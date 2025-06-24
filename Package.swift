@@ -37,7 +37,8 @@ let package = Package(
             dependencies: [
                 .product(name: "ExyteMediaPicker", package: "MediaPicker"),
                 .product(name: "ActivityIndicatorView", package: "ActivityIndicatorView"),
-                .product(name: "GiphyUISDK", package: "giphy-ios-sdk")
+                .product(name: "GiphyUISDK", package: "giphy-ios-sdk"),
+                .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI")
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")
