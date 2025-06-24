@@ -65,7 +65,7 @@ struct MessageView: View {
         - textPaddings
 
         let maxWidth = message.attachments.isEmpty ? widthWithoutMedia : MessageView.widthWithMedia - textPaddings
-        let styledText = message.text.styled(using: messageStyler)
+        let styledText = message.styledText ?? message.text.styled(using: messageStyler)
 
         let finalWidth = styledText.width(withConstrainedWidth: maxWidth, font: font)
         let lastLineWidth = styledText.lastLineWidth(labelWidth: maxWidth, font: font)
@@ -195,7 +195,9 @@ struct MessageView: View {
 
             if !message.text.isEmpty {
                 MessageTextView(
-                    text: message.text, messageStyler: messageStyler,
+                    text: message.text,
+                    styledText: message.styledText,
+                    messageStyler: messageStyler,
                     userType: message.user.type, shouldShowLinkPreview: shouldShowLinkPreview,
                     messageLinkPreviewLimit: messageLinkPreviewLimit
                 )
@@ -258,7 +260,9 @@ struct MessageView: View {
     @ViewBuilder
     func textWithTimeView(_ message: Message) -> some View {
         let messageView = MessageTextView(
-            text: message.text, messageStyler: messageStyler,
+            text: message.text,
+            styledText: message.styledText,
+            messageStyler: messageStyler,
             userType: message.user.type, shouldShowLinkPreview: shouldShowLinkPreview,
             messageLinkPreviewLimit: messageLinkPreviewLimit
         )
