@@ -121,6 +121,13 @@ struct MessageView: View {
                 }
 
                 bubbleView(message)
+
+                if showAvatar && !message.user.isCurrentUser {
+                    Text(message.user.name)
+                    .font(.caption)
+                    .opacity(0.8)
+                    .padding(.horizontal, 8)
+                }
             }
 
             if message.user.isCurrentUser, let status = message.status {
