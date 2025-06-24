@@ -10,9 +10,9 @@ import SwiftUI
 extension ChatView {
 
     nonisolated static func mapMessages(_ messages: [Message], chatType: ChatType, replyMode: ReplyMode) -> [MessagesSection] {
-        guard messages.hasUniqueIDs() else {
+        /*guard messages.hasUniqueIDs() else {
             fatalError("Messages can not have duplicate ids, please make sure every message gets a unique id")
-        }
+        }*/
 
         let result: [MessagesSection]
         switch replyMode {
