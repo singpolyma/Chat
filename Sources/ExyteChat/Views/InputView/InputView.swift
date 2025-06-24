@@ -287,7 +287,7 @@ struct InputView: View {
                             .font(.caption2)
                             .foregroundColor(theme.colors.mainCaptionText)
                         if !message.text.isEmpty {
-                            textView(message.text)
+                            Text(message.styledText ?? message.text.styled(using: messageStyler))
                                 .font(.caption2)
                                 .lineLimit(1)
                                 .foregroundColor(theme.colors.mainText)
@@ -319,11 +319,6 @@ struct InputView: View {
             }
             .fixedSize(horizontal: false, vertical: true)
         }
-    }
-    
-    @ViewBuilder
-    func textView(_ text: String) -> some View {
-        Text(text.styled(using: messageStyler))
     }
     
     var attachButton: some View {

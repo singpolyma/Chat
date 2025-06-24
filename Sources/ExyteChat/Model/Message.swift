@@ -55,6 +55,7 @@ public struct Message: Identifiable, Hashable, Sendable {
     public var createdAt: Date
 
     public var text: String
+    public var styledText: AttributedString?
     public var attachments: [Attachment]
     public var reactions: [Reaction]
     public var giphyMediaId: String?
@@ -68,6 +69,7 @@ public struct Message: Identifiable, Hashable, Sendable {
                 status: Status? = nil,
                 createdAt: Date = Date(),
                 text: String = "",
+                styledText: AttributedString? = nil,
                 attachments: [Attachment] = [],
                 giphyMediaId: String? = nil,
                 reactions: [Reaction] = [],
@@ -79,6 +81,7 @@ public struct Message: Identifiable, Hashable, Sendable {
         self.status = status
         self.createdAt = createdAt
         self.text = text
+        self.styledText = styledText
         self.attachments = attachments
         self.giphyMediaId = giphyMediaId
         self.reactions = reactions
@@ -171,6 +174,7 @@ public struct ReplyMessage: Codable, Identifiable, Hashable, Sendable {
     public var createdAt: Date
 
     public var text: String
+    public var styledText: AttributedString?
     public var attachments: [Attachment]
     public var recording: Recording?
 
@@ -178,6 +182,7 @@ public struct ReplyMessage: Codable, Identifiable, Hashable, Sendable {
                 user: User,
                 createdAt: Date,
                 text: String = "",
+                styledText: AttributedString? = nil,
                 attachments: [Attachment] = [],
                 recording: Recording? = nil) {
 
@@ -185,18 +190,19 @@ public struct ReplyMessage: Codable, Identifiable, Hashable, Sendable {
         self.user = user
         self.createdAt = createdAt
         self.text = text
+        self.styledText = styledText
         self.attachments = attachments
         self.recording = recording
     }
 
     func toMessage() -> Message {
-        Message(id: id, user: user, createdAt: createdAt, text: text, attachments: attachments, recording: recording)
+        Message(id: id, user: user, createdAt: createdAt, text: text, styledText: styledText, attachments: attachments, recording: recording)
     }
 }
 
 public extension Message {
 
     func toReplyMessage() -> ReplyMessage {
-        ReplyMessage(id: id, user: user, createdAt: createdAt, text: text, attachments: attachments, recording: recording)
+        ReplyMessage(id: id, user: user, createdAt: createdAt, text: text, styledText: styledText, attachments: attachments, recording: recording)
     }
 }

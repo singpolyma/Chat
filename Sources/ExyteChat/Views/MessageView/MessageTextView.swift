@@ -19,12 +19,14 @@ struct MessageTextView: View {
     private static let minLinkPreviewWidth: CGFloat = 140
 
     let text: String
+    let styledText: AttributedString?
     let messageStyler: (String) -> AttributedString
     let userType: UserType
     let shouldShowLinkPreview: (URL) -> Bool
     let messageLinkPreviewLimit: Int
 
-    var styledText: AttributedString {
+    var _styledText: AttributedString {
+        if let styledText { return styledText }
         var result = text.styled(using: messageStyler)
         result.foregroundColor = theme.colors.messageText(userType)
 
@@ -38,13 +40,13 @@ struct MessageTextView: View {
     }
 
     var urlsToPreview: [URL] {
-        Array(styledText.urls.filter(shouldShowLinkPreview).prefix(messageLinkPreviewLimit))
+        Array(_styledText.urls.filter(shouldShowLinkPreview).prefix(messageLinkPreviewLimit))
     }
 
     var body: some View {
-        if !styledText.characters.isEmpty {
+        if !_styledText.characters.isEmpty {
             VStack(alignment: .leading) {
-                Text(styledText)
+                Text(_styledText)
                     .sizeGetter($textSize)
 
                 // We use .enumerated(), and \.offset as the id, so that a message with duplicate links will show a preview for each.
@@ -65,14 +67,17 @@ struct MessageTextView_Previews: PreviewProvider {
     static var previews: some View {
         MessageTextView(
             text: "Look at [this website](https://example.org)",
+            styledText: nil,
             messageStyler: AttributedString.init, userType: .other,
             shouldShowLinkPreview: { _ in true }, messageLinkPreviewLimit: 8)
         MessageTextView(
             text: "Look at [this website](https://example.org)",
+            styledText: nil,
             messageStyler: String.markdownStyler, userType: .other,
             shouldShowLinkPreview: { _ in true }, messageLinkPreviewLimit: 8)
         MessageTextView(
             text: "[@Dan](mention://user/123456789) look at [this website](https://example.org)!",
+            styledText: nil,
             messageStyler: String.markdownStyler, userType: .other,
             shouldShowLinkPreview: { $0.scheme != "mention" }, messageLinkPreviewLimit: 8)
     }
