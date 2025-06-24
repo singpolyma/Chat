@@ -84,6 +84,7 @@ struct InputView: View {
     var messageStyler: (String) -> AttributedString
     var recorderSettings: RecorderSettings = RecorderSettings()
     var localization: ChatLocalization
+    var lhsAccessoryViewBuilder: (()->AnyView)? = nil
     
     @StateObject var recordingPlayer = RecordingPlayer()
     
@@ -155,6 +156,9 @@ struct InputView: View {
                     Color.clear.frame(width: 12, height: 1)
                 }
             }
+            if let lhsAccessoryViewBuilder {
+                lhsAccessoryViewBuilder()
+            }
         }
     }
     
@@ -189,7 +193,7 @@ struct InputView: View {
             switch state {
             case .empty, .waitingForRecordingPermission:
                 if case .message = style, isMediaAvailable() {
-                    cameraButton
+                    //cameraButton
                 }
             case .isRecordingHold, .isRecordingTap:
                 recordDurationInProcess
@@ -338,7 +342,7 @@ struct InputView: View {
             theme.images.inputView.sticker
                 .resizable()
                 .viewSize(24)
-                .padding(EdgeInsets(top: 12, leading: 6, bottom: 12, trailing: 12))
+                .padding(EdgeInsets(top: 12, leading: 6, bottom: 12, trailing: 6))
         }
     }
     

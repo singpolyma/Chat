@@ -71,12 +71,14 @@ public extension ChatView where MessageContent == EmptyView, InputViewContent ==
          replyMode: ReplyMode = .quote,
          didSendMessage: @escaping (DraftMessage) -> Void,
          reactionDelegate: ReactionDelegate? = nil,
+         lhsAccessoryViewBuilder: (()->AnyView)? = nil,
          messageMenuAction: MessageMenuActionClosure?) {
         self.type = chatType
         self.didSendMessage = didSendMessage
         self.reactionDelegate = reactionDelegate
         self.sections = ChatView.mapMessages(messages, chatType: chatType, replyMode: replyMode)
         self.ids = messages.map { $0.id }
+        self.lhsAccessoryViewBuilder = lhsAccessoryViewBuilder
         self.messageMenuAction = messageMenuAction
     }
 }
