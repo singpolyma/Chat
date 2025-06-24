@@ -71,9 +71,16 @@ final actor Recorder {
             audioRecorder?.record()
             durationProgressHandler(0.0, [])
 
-            audioTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                Task {
-                    await self?.onTimer(durationProgressHandler)
+            DispatchQueue.main.async { [weak self] in
+                self?.audioTimer?.invalidate()
+                self?.audioTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                    Task {
+                        await self?.onTimer(durationProgressHandler)
+                    }
+                }
+
+                if let audioTimer = self?.audioTimer {
+                    RunLoop.current.add(audioTimer, forMode: .common)
                 }
             }
 
