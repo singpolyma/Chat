@@ -78,6 +78,7 @@ public extension ChatView where MessageContent == EmptyView, InputViewContent ==
          didSendMessage: @escaping (DraftMessage) -> Void,
          didUpdateAttachmentStatus: ((AttachmentUploadUpdate) -> Void)? = nil,
          reactionDelegate: ReactionDelegate? = nil,
+         lhsAccessoryViewBuilder: (()->AnyView)? = nil,
          messageMenuAction: MessageMenuActionClosure?) {
         self.type = chatType
         self.didSendMessage = didSendMessage
@@ -85,6 +86,7 @@ public extension ChatView where MessageContent == EmptyView, InputViewContent ==
         self.reactionDelegate = reactionDelegate
         self.sections = ChatView.mapMessages(messages, chatType: chatType, replyMode: replyMode)
         self.ids = messages.map { $0.id }
+        self.lhsAccessoryViewBuilder = lhsAccessoryViewBuilder
         self.messageMenuAction = messageMenuAction
     }
 }

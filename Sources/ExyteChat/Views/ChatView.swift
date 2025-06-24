@@ -93,6 +93,9 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
     /// provide custom input view builder
     var inputViewBuilder: InputViewBuilderClosure? = nil
     
+    /// provide custom accesory view for left side of input
+    var lhsAccessoryViewBuilder: (()->AnyView)? = nil
+
     /// message menu customization: create enum complying to MessageMenuAction and pass a closure processing your enum cases
     var messageMenuAction: MessageMenuActionClosure?
     
@@ -412,7 +415,8 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
                     availableInputs: availableInputs,
                     messageStyler: messageStyler,
                     recorderSettings: recorderSettings,
-                    localization: localization
+                    localization: localization,
+                    lhsAccessoryViewBuilder: lhsAccessoryViewBuilder
                 )
             }
         }
