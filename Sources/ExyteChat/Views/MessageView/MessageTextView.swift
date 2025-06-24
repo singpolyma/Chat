@@ -46,8 +46,16 @@ struct MessageTextView: View {
     var body: some View {
         if !_styledText.characters.isEmpty {
             VStack(alignment: .leading) {
-                Text(_styledText)
-                    .sizeGetter($textSize)
+                if userType == .current {
+                    Text(_styledText)
+                        .tint(Color("TertiaryColor"))
+                        .sizeGetter($textSize)
+
+                } else {
+                    Text(_styledText)
+                        .sizeGetter($textSize)
+
+                }
 
                 // We use .enumerated(), and \.offset as the id, so that a message with duplicate links will show a preview for each.
                 if !urlsToPreview.isEmpty {
