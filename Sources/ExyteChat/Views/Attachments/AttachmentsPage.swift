@@ -3,6 +3,7 @@
 //
 
 import SwiftUI
+import SDWebImageSwiftUI
 
 struct AttachmentsPage: View {
 
@@ -13,7 +14,7 @@ struct AttachmentsPage: View {
 
     var body: some View {
         if attachment.type == .image {
-            CachedAsyncImage(url: attachment.full, urlCache: .imageCache) { phase in
+            WebImage(url: attachment.full) { phase in
                 switch phase {
                 case let .success(image):
                     image

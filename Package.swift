@@ -26,6 +26,10 @@ let package = Package(
            url: "https://github.com/Giphy/giphy-ios-sdk",
            exact: "2.2.12"
         ),
+        .package(
+           url: "https://github.com/SDWebImage/SDWebImageSwiftUI",
+           from: "3.1.3"
+        ),
     ],
     targets: [
         .target(
