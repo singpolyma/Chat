@@ -311,8 +311,7 @@ struct MessageView: View {
                 messageView
                     .padding(.vertical, 8)
                     .overlay(alignment: .bottomTrailing) {
-                        timeView
-                            .padding(.vertical, 8)
+                        timeView.padding(.vertical, 8)
                     }
             }
         }
@@ -334,14 +333,19 @@ struct MessageView: View {
 
     func messageTimeView(needsCapsule: Bool = false) -> some View {
         Group {
-            if showMessageTimeView {
-                if needsCapsule {
-                    MessageTimeWithCapsuleView(
-                        text: message.time, isCurrentUser: message.user.isCurrentUser,
-                        chatTheme: theme)
-                } else {
-                    MessageTimeView(
-                        text: message.time, userType: message.user.type, chatTheme: theme)
+            HStack {
+                if let icon = message.icon {
+                    WebImage(url: icon)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 10, height: 10)
+                }
+                if showMessageTimeView {
+                    if needsCapsule {
+                        MessageTimeWithCapsuleView(text: message.time, isCurrentUser: message.user.isCurrentUser, chatTheme: theme)
+                    } else {
+                        MessageTimeView(text: message.time, userType: message.user.type, chatTheme: theme)
+                    }
                 }
             }
         }
