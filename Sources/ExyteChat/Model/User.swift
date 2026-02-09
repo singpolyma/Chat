@@ -13,6 +13,7 @@ public struct User: Codable, Identifiable, Hashable, Sendable {
     public let name: String
     public let avatarURL: URL?
     public let avatarCacheKey: String?
+    public let avatarPlaceholderURL: URL?
     public let type: UserType
     public var isCurrentUser: Bool { type == .current }
     
@@ -20,15 +21,17 @@ public struct User: Codable, Identifiable, Hashable, Sendable {
         self.id = id
         self.name = name
         self.avatarURL = avatarURL
+        self.avatarPlaceholderURL = nil
         self.avatarCacheKey = avatarCacheKey
         self.type = isCurrentUser ? .current : .other
     }
     
-    public init(id: String, name: String, avatarURL: URL?, avatarCacheKey: String? = nil, type: UserType) {
+    public init(id: String, name: String, avatarURL: URL?, avatarPlaceholderURL: URL?, avatarCacheKey: String? = nil, isCurrentUser: Bool) {
         self.id = id
         self.name = name
         self.avatarURL = avatarURL
+        self.avatarPlaceholderURL = avatarPlaceholderURL
         self.avatarCacheKey = avatarCacheKey
-        self.type = type
+        self.type = isCurrentUser ? .current : .other
     }
 }

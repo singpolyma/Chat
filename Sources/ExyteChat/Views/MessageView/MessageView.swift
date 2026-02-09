@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SDWebImageSwiftUI
 
 struct MessageView: View {
 
@@ -226,20 +227,11 @@ struct MessageView: View {
     var avatarView: some View {
         Group {
             if showAvatar {
-                if let url = message.user.avatarURL {
-                    AvatarImageView(url: url, avatarSize: avatarSize, avatarCacheKey: message.user.avatarCacheKey)
-                        .contentShape(Circle())
-                        .onTapGesture {
-                            tapAvatarClosure?(message.user, message.id)
-                        }
-                } else {
-                    AvatarNameView(name: message.user.name, avatarSize: avatarSize)
-                        .contentShape(Circle())
-                        .onTapGesture {
-                            tapAvatarClosure?(message.user, message.id)
-                        }
-                }
-
+                AvatarImageView(url: message.user.avatarURL, placeholder: message.user.avatarPlaceholderURL, avatarSize: avatarSize)
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        tapAvatarClosure?(message.user, message.id)
+                    }
             } else {
                 Color.clear.viewSize(avatarSize)
             }

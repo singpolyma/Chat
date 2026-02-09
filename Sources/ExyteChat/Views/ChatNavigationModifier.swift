@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SDWebImageSwiftUI
 
 struct ChatNavigationModifier: ViewModifier {
 
@@ -37,7 +38,7 @@ struct ChatNavigationModifier: ViewModifier {
         ToolbarItem(placement: .principal) {
             HStack {
                 if let url = cover {
-                    CachedAsyncImage(url: url) { phase in
+                    WebImage(url: url) { phase in
                         switch phase {
                         case .success(let image):
                             image

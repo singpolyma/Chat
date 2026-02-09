@@ -30,6 +30,10 @@ let package = Package(
             url: "https://github.com/onevcat/Kingfisher",
             from: "8.5.0"
         ),
+        .package(
+           url: "https://github.com/SDWebImage/SDWebImageSwiftUI",
+           from: "3.1.3"
+        ),
     ],
     targets: [
         .target(
@@ -38,7 +42,8 @@ let package = Package(
                 .product(name: "ExyteMediaPicker", package: "MediaPicker"),
                 .product(name: "ActivityIndicatorView", package: "ActivityIndicatorView"),
                 .product(name: "GiphyUISDK", package: "giphy-ios-sdk"),
-                .product(name: "Kingfisher", package: "Kingfisher")
+                .product(name: "Kingfisher", package: "Kingfisher"),
+                .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI")
             ],
             swiftSettings: [
                 .enableExperimentalFeature("StrictConcurrency")

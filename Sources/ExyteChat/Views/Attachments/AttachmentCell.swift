@@ -3,6 +3,7 @@
 //
 
 import SwiftUI
+import SDWebImageSwiftUI
 
 public struct AttachmentCell: View {
 
@@ -185,10 +186,7 @@ struct AsyncImageView: View {
     let size: CGSize
 
     var body: some View {
-        CachedAsyncImage(
-            url: attachment.thumbnail,
-            cacheKey: attachment.thumbnailCacheKey
-        ) { imageView in
+        WebImage(url: attachment.thumbnail) { imageView in
             imageView
                 .resizable()
                 .scaledToFill()
