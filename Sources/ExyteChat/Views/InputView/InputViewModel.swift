@@ -37,9 +37,11 @@ final class InputViewModel: ObservableObject {
     }
 
     func onStart() {
-        subscribeValidation()
-        subscribePicker()
-        subscribeGiphyPicker()
+        DispatchQueue.main.async { [weak self] in
+            self?.subscribeValidation()
+            self?.subscribePicker()
+            self?.subscribeGiphyPicker()
+        }
     }
 
     func onStop() {
