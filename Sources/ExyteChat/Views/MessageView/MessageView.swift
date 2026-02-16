@@ -171,7 +171,7 @@ struct MessageView: View {
                     attachmentsView(message)
                 }
 
-                if !message.text.isEmpty {
+                if !message.text.isEmpty && (message.styledText == nil || message.styledText! != "") {
                     textWithTimeView(message)
                         .font(Font(font))
                 }
