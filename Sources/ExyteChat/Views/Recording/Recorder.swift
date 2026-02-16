@@ -118,7 +118,7 @@ final actor Recorder {
         case kAudioFormatAppleLossless:
             return ".m4a"
         case kAudioFormatOpus:
-            return ".opus"
+            return ".caf"
         case kAudioFormatAC3:
             return ".ac3"
         case kAudioFormatFLAC:
