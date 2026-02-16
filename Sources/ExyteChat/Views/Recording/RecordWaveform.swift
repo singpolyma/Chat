@@ -5,6 +5,7 @@
 //  Created by Alisa Mylnikova on 14.03.2023.
 //
 
+import AVFoundation
 import SwiftUI
 
 struct RecordWaveformWithButtons: View {
@@ -63,6 +64,18 @@ struct RecordWaveformWithButtons: View {
         .onDisappear {
             Task {
                 await recordPlayer.pause()
+            }
+        }
+        .onAppear {
+            if recording.duration <= 0 {
+                if let url = recording.url {
+                    Task {
+                        if let duration = try? await AVURLAsset(url: url).load(.duration) {
+                            recordPlayer.duration = duration.seconds
+                            recordPlayer.secondsLeft = duration.seconds
+                        }
+                    }
+                }
             }
         }
     }
