@@ -19,7 +19,7 @@ struct AvatarImageView: View {
                 .scaledToFill()
         } placeholder: {
             if let placeholder {
-		WebImage(url: placeholder)
+                WebImage(url: placeholder).resizable().scaledToFill()
             } else {
                 Rectangle().fill(Color.gray)
             }
