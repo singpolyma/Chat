@@ -22,7 +22,7 @@ public enum DefaultMessageMenuAction: MessageMenuAction, Sendable {
 
     case copy
     case reply
-    case edit(saveClosure: @Sendable (String) -> Void)
+    case edit(saveClosure: @Sendable (AttributedString) -> Void)
 
     public func title() -> String {
         switch self {

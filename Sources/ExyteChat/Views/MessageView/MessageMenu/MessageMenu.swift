@@ -62,6 +62,9 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
     var onAction: (ActionEnum) -> ()
     /// The current reaction configuration (delegate and callback)
     var reactionHandler: ReactionConfig
+
+    var actionFilter: ((_ action: ActionEnum, _ message: Message)->Bool) = { _, _ in true }
+
     /// The main message, rendered as a button
     var mainButton: () -> MainButton
 
@@ -506,7 +509,7 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
     
     @ViewBuilder
     func menuView() -> some View {
-        let buttons = ActionEnum.menuItems(for: message).enumerated().map { MenuButton(id: $0, action: $1) }
+        let buttons = ActionEnum.menuItems(for: message).filter({ actionFilter($0, message) }).enumerated().map { MenuButton(id: $0, action: $1) }
         HStack {
             if alignment == .right { Spacer() }
             

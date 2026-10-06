@@ -61,6 +61,7 @@ final class ChatViewModel: ObservableObject {
             globalFocusState?.focus = .uuid(inputFieldId)
         case .edit(let saveClosure):
             inputViewModel?.text = message.text
+            inputViewModel?.attributedText = message.styledText ?? AttributedString(message.text)
             inputViewModel?.edit(saveClosure)
             globalFocusState?.focus = .uuid(inputFieldId)
         }

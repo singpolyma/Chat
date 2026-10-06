@@ -79,7 +79,8 @@ public extension ChatView where MessageContent == EmptyView, InputViewContent ==
          didUpdateAttachmentStatus: ((AttachmentUploadUpdate) -> Void)? = nil,
          reactionDelegate: ReactionDelegate? = nil,
          lhsAccessoryViewBuilder: (()->AnyView)? = nil,
-         messageMenuAction: MessageMenuActionClosure?) {
+         messageMenuAction: MessageMenuActionClosure?,
+         messageMenuActionFilter: ((MenuAction, Message) -> Bool)? = nil) {
         self.type = chatType
         self.didSendMessage = didSendMessage
         self.didUpdateAttachmentStatus = didUpdateAttachmentStatus
@@ -88,6 +89,9 @@ public extension ChatView where MessageContent == EmptyView, InputViewContent ==
         self.ids = messages.map { $0.id }
         self.lhsAccessoryViewBuilder = lhsAccessoryViewBuilder
         self.messageMenuAction = messageMenuAction
+        if let messageMenuActionFilter {
+            self.messageMenuActionFilter = messageMenuActionFilter
+        }
     }
 }
 

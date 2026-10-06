@@ -8,7 +8,7 @@ import ExyteMediaPicker
 
 public struct DraftMessage: Sendable {
     public var id: String?
-    public let text: String
+    public let text: AttributedString
     public let medias: [Media]
     public let giphyMedia: GPHMedia?
     public let recording: Recording?
@@ -16,7 +16,7 @@ public struct DraftMessage: Sendable {
     public let createdAt: Date
     
     public init(id: String? = nil,
-                text: String,
+                text: AttributedString,
                 medias: [Media],
                 giphyMedia: GPHMedia?,
                 recording: Recording?,

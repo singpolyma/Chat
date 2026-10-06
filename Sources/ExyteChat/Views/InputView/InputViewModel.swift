@@ -10,6 +10,7 @@ import ExyteMediaPicker
 final class InputViewModel: ObservableObject {
 
     @Published var text = ""
+    @Published var attributedText: AttributedString = ""
     @Published var attachments = InputViewAttachments()
     @Published var state: InputViewState = .empty
 
@@ -25,7 +26,7 @@ final class InputViewModel: ObservableObject {
 
     private var recorder = Recorder()
 
-    private var saveEditingClosure: ((String) -> Void)?
+    private var saveEditingClosure: ((AttributedString) -> Void)?
 
     private var recordPlayerSubscription: AnyCancellable?
     private var subscriptions = Set<AnyCancellable>()
@@ -53,6 +54,7 @@ final class InputViewModel: ObservableObject {
             self?.showPicker = false
             self?.showGiphyPicker = false
             self?.text = ""
+            self?.attributedText = ""
             self?.saveEditingClosure = nil
             self?.attachments = InputViewAttachments()
             self?.subscribeValidation()
@@ -68,7 +70,7 @@ final class InputViewModel: ObservableObject {
         }
     }
 
-    func edit(_ closure: @escaping (String) -> Void) {
+    func edit(_ closure: @escaping (AttributedString) -> Void) {
         saveEditingClosure = closure
         state = .editing
     }
@@ -133,7 +135,11 @@ final class InputViewModel: ObservableObject {
                 await recordingPlayer?.pause()
             }
         case .saveEdit:
-            saveEditingClosure?(text)
+            if #available(iOS 26.0, *) {
+                saveEditingClosure?(attributedText)
+            } else {
+                saveEditingClosure?(AttributedString(text))
+            }
             reset()
         case .cancelEdit:
             reset()
@@ -166,9 +172,10 @@ private extension InputViewModel {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             guard state != .editing else { return } // special case
-            if !self.text.isEmpty || !self.attachments.medias.isEmpty {
+            if !self.text.isEmpty || !self.attachments.medias.isEmpty || self.attributedText != "" {
                 self.state = .hasTextOrMedia
             } else if self.text.isEmpty,
+                      self.attributedText == "",
                       self.attachments.medias.isEmpty,
                       self.attachments.recording == nil {
                 self.state = .empty
@@ -183,6 +190,11 @@ private extension InputViewModel {
         .store(in: &subscriptions)
 
         $text.sink { [weak self] _ in
+            self?.validateDraft()
+        }
+        .store(in: &subscriptions)
+
+        $attributedText.sink { [weak self] _ in
             self?.validateDraft()
         }
         .store(in: &subscriptions)
@@ -227,9 +239,14 @@ private extension InputViewModel {
 private extension InputViewModel {
 
     func sendMessage() {
+        let body = if #available(iOS 26.0, *) {
+            self.attributedText
+        } else {
+            AttributedString(self.text)
+        }
         showActivityIndicator = true
         let draft = DraftMessage(
-            text: self.text,
+            text: body,
             medias: attachments.medias,
             giphyMedia: attachments.giphyMedia,
             recording: attachments.recording,

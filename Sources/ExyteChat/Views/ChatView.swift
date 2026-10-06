@@ -98,6 +98,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
 
     /// message menu customization: create enum complying to MessageMenuAction and pass a closure processing your enum cases
     var messageMenuAction: MessageMenuActionClosure?
+    var messageMenuActionFilter: ((_ action: MenuAction, _ message: Message)->Bool) = { _, _ in true }
     
     /// content to display in between the chat list view and the input view
     var betweenListAndInputViewBuilder: (()->AnyView)?
@@ -444,7 +445,8 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
             reactionHandler: MessageMenu.ReactionConfig(
                 delegate: reactionDelegate,
                 didReact: reactionClosure(row.message)
-            )
+            ),
+            actionFilter: messageMenuActionFilter
         ) {
             ChatMessageView(
                 viewModel: viewModel, messageBuilder: messageBuilder, row: row, chatType: type,

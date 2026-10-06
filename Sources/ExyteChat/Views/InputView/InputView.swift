@@ -177,6 +177,7 @@ struct InputView: View {
             default:
                 TextInputView(
                     text: $viewModel.text,
+                    attributedText: $viewModel.attributedText,
                     inputFieldId: inputFieldId,
                     style: style,
                     availableInputs: availableInputs,
