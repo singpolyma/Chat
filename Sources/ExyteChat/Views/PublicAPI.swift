@@ -309,6 +309,10 @@ public extension ChatView {
         messageLinkPreviewLimit(enabled ? self.messageCustomizationParameters.linkPreviewLimit : 0)
     }
 
+    func linkPreviewsDisabled() -> ChatView {
+        linkPreviewsEnabled(false)
+    }
+
     func shouldShowPreviewForLink(_ shouldShowPreviewForLink: @escaping (URL) -> Bool) -> ChatView {
         var view = self
         view.messageCustomizationParameters.shouldShowPreviewForLink = shouldShowPreviewForLink
