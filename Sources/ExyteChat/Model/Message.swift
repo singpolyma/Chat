@@ -7,13 +7,13 @@
 
 import SwiftUI
 
-public struct Message: Identifiable, Hashable, Sendable {
+public struct Message: Identifiable, Sendable {
 
     public enum Status: Equatable, Hashable, Sendable {
         case sending
         case sent
         case delivered
-        case read
+        case readBy([String]) // user ids
         case error(DraftMessage)
 
         public func hash(into hasher: inout Hasher) {
@@ -24,7 +24,7 @@ public struct Message: Identifiable, Hashable, Sendable {
                 return hasher.combine("sent")
             case .delivered:
                 return hasher.combine("delivered")
-            case .read:
+            case .readBy:
                 return hasher.combine("read")
             case .error:
                 return hasher.combine("error")
@@ -39,8 +39,8 @@ public struct Message: Identifiable, Hashable, Sendable {
                 return true
             case (.delivered, .delivered):
                 return true
-            case (.read, .read):
-                return true
+            case (.readBy(let r1), .readBy(let r2)):
+                return r1 == r2
             case ( .error(_), .error(_)):
                 return true
             default:
@@ -54,84 +54,138 @@ public struct Message: Identifiable, Hashable, Sendable {
     public var status: Status?
     public var createdAt: Date
 
-    public var text: String
-    public var styledText: AttributedString?
+    public var attributedText: AttributedString
     public var attachments: [Attachment]
     public var reactions: [Reaction]
     public var giphyMediaId: String?
+    public var staticLocation: StaticLocation?
+    public var liveLocation: LiveLocation?
     public var recording: Recording?
     public var replyMessage: ReplyMessage?
+    /// Small icon shown next to the message time (e.g. thread indicator)
     public var icon: URL?
+    public var customData: [String: any Sendable]
 
     public var triggerRedraw: UUID?
 
-    public init(id: String,
-                user: User,
-                status: Status? = nil,
-                createdAt: Date = Date(),
-                text: String = "",
-                styledText: AttributedString? = nil,
-                attachments: [Attachment] = [],
-                giphyMediaId: String? = nil,
-                reactions: [Reaction] = [],
-                recording: Recording? = nil,
-                replyMessage: ReplyMessage? = nil,
-                icon: URL? = nil) {
+    public var hasText: Bool {
+        !attributedText.characters.isEmpty
+    }
 
+    public var text: String {
+        String(attributedText.characters)
+    }
+
+    public init(
+        id: String,
+        user: User,
+        status: Status? = nil,
+        createdAt: Date = Date(),
+        text: String = "",
+        attachments: [Attachment] = [],
+        giphyMediaId: String? = nil,
+        staticLocation: StaticLocation? = nil,
+        liveLocation: LiveLocation? = nil,
+        reactions: [Reaction] = [],
+        recording: Recording? = nil,
+        replyMessage: ReplyMessage? = nil,
+        icon: URL? = nil,
+        customData: [String: any Sendable] = [:]
+    ) {
         self.id = id
         self.user = user
         self.status = status
         self.createdAt = createdAt
-        self.text = text
-        self.styledText = styledText
+        self.attributedText = text.applyDefaultAttributes()
         self.attachments = attachments
         self.giphyMediaId = giphyMediaId
+        self.staticLocation = staticLocation
+        self.liveLocation = liveLocation
         self.reactions = reactions
         self.recording = recording
         self.replyMessage = replyMessage
         self.icon = icon
+        self.customData = customData
+    }
+
+    public init(
+        id: String,
+        user: User,
+        status: Status? = nil,
+        createdAt: Date = Date(),
+        attributedText: AttributedString,
+        attachments: [Attachment] = [],
+        giphyMediaId: String? = nil,
+        staticLocation: StaticLocation? = nil,
+        liveLocation: LiveLocation? = nil,
+        reactions: [Reaction] = [],
+        recording: Recording? = nil,
+        replyMessage: ReplyMessage? = nil,
+        icon: URL? = nil,
+        customData: [String: any Sendable] = [:]
+    ) {
+        self.id = id
+        self.user = user
+        self.status = status
+        self.createdAt = createdAt
+        self.attributedText = attributedText
+        self.attachments = attachments
+        self.giphyMediaId = giphyMediaId
+        self.staticLocation = staticLocation
+        self.liveLocation = liveLocation
+        self.reactions = reactions
+        self.recording = recording
+        self.replyMessage = replyMessage
+        self.icon = icon
+        self.customData = customData
     }
 
     public static func makeMessage(
         id: String,
         user: User,
         status: Status? = nil,
-        draft: DraftMessage) async -> Message {
-            let attachments = await draft.medias.asyncCompactMap { media -> Attachment? in
-                guard let thumbnailURL = await media.getThumbnailURL() else {
+        draft: DraftMessage
+    ) async -> Message {
+        let attachments = await draft.medias.asyncCompactMap { media -> Attachment? in
+            guard let thumbnailURL = await media.getThumbnailURL() else {
+                return nil
+            }
+
+            switch media.type {
+            case .image:
+                return Attachment(id: UUID().uuidString, url: thumbnailURL, type: .image)
+            case .video:
+                guard let fullURL = await media.getURL() else {
                     return nil
                 }
-                
-                switch media.type {
-                case .image:
-                    return Attachment(id: UUID().uuidString, url: thumbnailURL, type: .image)
-                case .video:
-                    guard let fullURL = await media.getURL() else {
-                        return nil
-                    }
-                    return Attachment(id: UUID().uuidString, thumbnail: thumbnailURL, full: fullURL, type: .video)
-                }
+                return Attachment(id: UUID().uuidString, thumbnail: thumbnailURL, full: fullURL, type: .video)
             }
-            
-            let giphyMediaId = draft.giphyMedia?.id
-            
-            return Message(
-                id: id,
-                user: user,
-                status: status,
-                createdAt: draft.createdAt,
-                text: String(draft.text.characters[...]),
-                styledText: draft.text,
-                attachments: attachments,
-                giphyMediaId: giphyMediaId,
-                recording: draft.recording,
-                replyMessage: draft.replyMessage
-            )
         }
+
+        let documentAttachments = draft.documents.map { document in
+            Attachment(id: document.id, url: document.url, type: .document, fileName: document.fileName, fileSize: document.fileSize)
+        }
+
+        let giphyMediaId = draft.giphyMedia?.id
+
+        return Message(
+            id: id,
+            user: user,
+            status: status,
+            createdAt: draft.createdAt,
+            attributedText: draft.text,
+            attachments: attachments + documentAttachments,
+            giphyMediaId: giphyMediaId,
+            staticLocation: draft.staticLocation,
+            liveLocation: draft.liveLocation,
+            recording: draft.recording,
+            replyMessage: draft.replyMessage
+        )
+    }
 }
 
 extension Message {
-    var time: String {
+    var formattedDate: String {
         DateFormatter.timeFormatter.string(from: createdAt)
     }
 }
@@ -142,12 +196,16 @@ extension Message: Equatable {
         lhs.user == rhs.user &&
         lhs.status == rhs.status &&
         lhs.createdAt == rhs.createdAt &&
-        lhs.text == rhs.text &&
+        lhs.attributedText == rhs.attributedText &&
         lhs.giphyMediaId == rhs.giphyMediaId &&
+        lhs.staticLocation == rhs.staticLocation &&
+        lhs.liveLocation == rhs.liveLocation &&
         lhs.attachments == rhs.attachments &&
         lhs.reactions == rhs.reactions &&
         lhs.recording == rhs.recording &&
-        lhs.replyMessage == rhs.replyMessage
+        lhs.replyMessage == rhs.replyMessage &&
+        lhs.icon == rhs.icon &&
+        lhs.triggerRedraw == rhs.triggerRedraw
     }
 }
 
@@ -168,7 +226,7 @@ public struct ReplyMessage: Codable, Identifiable, Hashable, Sendable {
         lhs.id == rhs.id &&
         lhs.user == rhs.user &&
         lhs.createdAt == rhs.createdAt &&
-        lhs.text == rhs.text &&
+        lhs.attributedText == rhs.attributedText &&
         lhs.attachments == rhs.attachments &&
         lhs.recording == rhs.recording
     }
@@ -177,36 +235,53 @@ public struct ReplyMessage: Codable, Identifiable, Hashable, Sendable {
     public var user: User
     public var createdAt: Date
 
-    public var text: String
-    public var styledText: AttributedString?
+    public var attributedText: AttributedString
     public var attachments: [Attachment]
     public var recording: Recording?
 
-    public init(id: String,
-                user: User,
-                createdAt: Date,
-                text: String = "",
-                styledText: AttributedString? = nil,
-                attachments: [Attachment] = [],
-                recording: Recording? = nil) {
+    public var text: String {
+        String(attributedText.characters)
+    }
 
+    public init(
+        id: String,
+        user: User,
+        createdAt: Date,
+        text: String = "",
+        attachments: [Attachment] = [],
+        recording: Recording? = nil
+    ) {
         self.id = id
         self.user = user
         self.createdAt = createdAt
-        self.text = text
-        self.styledText = styledText
+        self.attributedText = text.applyDefaultAttributes()
+        self.attachments = attachments
+        self.recording = recording
+    }
+
+    public init(
+        id: String,
+        user: User,
+        createdAt: Date,
+        attributedText: AttributedString,
+        attachments: [Attachment] = [],
+        recording: Recording? = nil
+    ) {
+        self.id = id
+        self.user = user
+        self.createdAt = createdAt
+        self.attributedText = attributedText
         self.attachments = attachments
         self.recording = recording
     }
 
     func toMessage() -> Message {
-        Message(id: id, user: user, createdAt: createdAt, text: text, styledText: styledText, attachments: attachments, recording: recording)
+        Message(id: id, user: user, createdAt: createdAt, attributedText: attributedText, attachments: attachments, recording: recording)
     }
 }
 
 public extension Message {
-
     func toReplyMessage() -> ReplyMessage {
-        ReplyMessage(id: id, user: user, createdAt: createdAt, text: text, styledText: styledText, attachments: attachments, recording: recording)
+        ReplyMessage(id: id, user: user, createdAt: createdAt, attributedText: attributedText, attachments: attachments, recording: recording)
     }
 }

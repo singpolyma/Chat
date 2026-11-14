@@ -55,12 +55,12 @@ struct TextInputView: View {
                 .padding(.leading, 10)
                 .sizeGetter($textSize)
         )
-        .padding(.leading, !isMediaGiphyAvailable() ? 12 : 0)
+        .padding(.leading, !isAttachmentsAvailable() ? 12 : 0)
     }
     
-    private func isMediaGiphyAvailable() -> Bool {
-        return availableInputs.contains(AvailableInputType.media)
-        || availableInputs.contains(AvailableInputType.giphy)
+    private func isAttachmentsAvailable() -> Bool {
+        let attachmentTypes: [AvailableInputType] = [.media, .giphy, .document, .staticLocation, .liveLocation]
+        return attachmentTypes.contains { availableInputs.contains($0) }
     }
 }
 

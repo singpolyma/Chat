@@ -29,13 +29,14 @@ private struct LinkViewRepresentable: UIViewRepresentable {
 
     func updateUIView(_ uiView: LPLinkView, context: Context) {}
 
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: LPLinkView, context: Context) -> CGSize?
-    {
-        let width = proposal.width ?? uiView.intrinsicContentSize.width
-        let height = proposal.height ?? uiView.intrinsicContentSize.height
-        return CGSize(width: width, height: height)
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: LPLinkView, context: Context) -> CGSize? {
+        let proposedWidth = proposal.width ?? .greatestFiniteMagnitude
+        let fit = uiView.sizeThatFits(
+            CGSize(width: proposedWidth, height: .greatestFiniteMagnitude)
+        )
+        let height = proposal.height ?? fit.height
+        return CGSize(width: fit.width, height: height)
     }
-
 }
 
 /// In our default chat view, link previews appear in the message itself.
@@ -43,9 +44,6 @@ private struct LinkViewRepresentable: UIViewRepresentable {
 /// Unfortunately, Apple does not let us customise the LPLinkView presentation (e.g. hiding the preview image), apart from modifying the view's size.
 /// Therefore, create a small wrapper around LinkViewRepresentable, which presents the preview in a small "pill" form.
 private struct PlaceholderOrEnrichedLinkPillView: View {
-
-    /// The largest height without the preview image/video becoming visible.
-    private static let pillHeight: CGFloat = 53
 
     private let metadata: LinkPreviewMetadata
 
@@ -59,9 +57,7 @@ private struct PlaceholderOrEnrichedLinkPillView: View {
 
     var body: some View {
         LinkViewRepresentable(metadata: metadata)
-            .frame(height: Self.pillHeight)
     }
-
 }
 
 /// PlaceholderOrEnrichedLinkPillView has two mutually exclusive cases - either displaying a placeholder, or enriched content.
@@ -70,7 +66,7 @@ private struct PlaceholderOrEnrichedLinkPillView: View {
 ///
 /// Therefore, this view manages this complexity, hiding the state of whether the enriched metadata is loaded or not.
 /// Since this view is the only view generating link preview metadata, it also manages the cache.
-struct LinkPillView: View {
+struct LinkPreviewView: View {
 
     @State var metadata: LinkPreviewMetadata
     private static let cache = LinkMetadataCache()
@@ -108,9 +104,8 @@ struct LinkPillView: View {
         }
         .animation(.default, value: metadata)
     }
-
 }
 
 #Preview {
-    LinkPillView(url: URL(string: "https://example.org")!)
+    LinkPreviewView(url: URL(string: "https://example.org")!)
 }

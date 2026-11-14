@@ -10,35 +10,36 @@ final class ChatExampleViewModel: ObservableObject, ReactionDelegate {
 
     @Published var messages: [Message] = []
 
-    @Published var chatTitle: String = ""
-    @Published var chatStatus: String = ""
-    @Published var chatCover: URL?
+    var tableTransaction: TableUpdateTransaction?
+    var scrollToParams: ScrollToParams?
 
-    private let interactor: MockChatInteractor
-    private var timer: Timer?
+    var newPagesCount = 0
+    let maxNewPagesCount = 2
 
-    init(interactor: MockChatInteractor = MockChatInteractor()) {
-        self.interactor = interactor
+    private let interactor = MockChatInteractor(isActive: false)
 
-        Task {
-            let senders = await interactor.otherSenders
-            self.chatTitle = senders.count == 1 ? senders.first!.name : "Group chat"
-            self.chatStatus = senders.count == 1 ? "online" : "\(senders.count + 1) members"
-            self.chatCover = senders.count == 1 ? senders.first!.avatar : nil
-        }
+    init() {
+        updateMessages()
     }
 
     func send(draft: DraftMessage) {
         Task {
             await interactor.send(draftMessage: draft)
-            self.updateMessages()
+            updateMessages()
         }
     }
     
     func remove(messageID: String) {
         Task {
             await interactor.remove(messageID: messageID)
-            self.updateMessages()
+            updateMessages()
+        }
+    }
+
+    func updateLiveLocation(messageId: String, liveLocation: LiveLocation) {
+        Task {
+            await interactor.updateLiveLocation(messageId: messageId, liveLocation: liveLocation)
+            updateMessages()
         }
     }
 
@@ -48,36 +49,28 @@ final class ChatExampleViewModel: ObservableObject, ReactionDelegate {
         }
     }
 
-    func onStart() {
-        Task {
-            self.updateMessages()
-            connect()
+    func loadNewerMessagesPage() async {
+        guard let tableTransaction else { return }
+        newPagesCount += 1
+        await interactor.loadNewerMessagesPage()
+        let messages = await interactor.toMessages()
+        await tableTransaction(animationMode: .keepStable) {
+            self.messages = messages
         }
     }
 
-    func connect() {
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { timer in
-            Task {
-                await self.interactor.timerTick()
-                await self.updateMessages()
-            }
-        }
-    }
-
-    func onStop() {
-        timer?.invalidate()
-    }
-
-    func loadMoreMessage(before message: Message) {
-        Task {
-            await interactor.loadNextPage()
-            updateMessages()
+    func loadOlderMessagesPage() async {
+        guard let tableTransaction else { return }
+        await interactor.loadOlderMessagesPage()
+        let messages = await interactor.toMessages()
+        await tableTransaction(animated: false) {
+            self.messages = messages
         }
     }
 
     func updateMessages() {
         Task {
-            self.messages = await interactor.messages.compactMap { $0.toChatMessage() }
+            self.messages = await interactor.toMessages()
         }
     }
 }

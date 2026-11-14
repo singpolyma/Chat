@@ -11,6 +11,7 @@ public extension EnvironmentValues {
     #if swift(>=6.0)
     @Entry var chatTheme = ChatTheme()
     @Entry var giphyConfig = GiphyConfiguration()
+    @Entry var chatLocalization = ChatLocalization.defaultLocalization
     #else
     var chatTheme: ChatTheme {
         get { self[ChatThemeKey.self] }
@@ -20,6 +21,11 @@ public extension EnvironmentValues {
     var giphyConfig: GiphyConfiguration {
         get { self[GiphyConfigurationKey.self] }
         set { self[GiphyConfigurationKey.self] = newValue }
+    }
+
+    var chatLocalization: ChatLocalization {
+        get { self[ChatLocalizationKey.self] }
+        set { self[ChatLocalizationKey.self] = newValue }
     }
     #endif
 }
@@ -32,6 +38,10 @@ public extension EnvironmentValues {
 
 public struct GiphyConfigurationKey: EnvironmentKey {
     public static let defaultValue = GiphyConfiguration()
+}
+
+public struct ChatLocalizationKey: EnvironmentKey {
+    public static let defaultValue = ChatLocalization.defaultLocalization
 }
 #endif
 
@@ -53,10 +63,14 @@ extension View {
     }
 }
 
-public struct ChatTheme {
+public struct ChatTheme: Sendable {
     public let colors: ChatTheme.Colors
     public let images: ChatTheme.Images
     public let style: ChatTheme.Style
+
+    public var contentBG: Color {
+        images.background != nil ? .clear : colors.mainBG
+    }
 
     public init(
         colors: ChatTheme.Colors = .init(),
@@ -65,13 +79,7 @@ public struct ChatTheme {
     ) {
         self.style = style
         self.images = images
-        
-        // if background images have been set then override the mainBG color to be clear
-        self.colors = if images.background != nil {
-            ChatTheme.Colors(copy: colors, mainBG: .clear)
-        } else {
-            colors
-        }
+        self.colors = colors
     }
     
     internal init(accentColor: Color, images: ChatTheme.Images) {
@@ -105,7 +113,7 @@ public struct ChatTheme {
         )
     }
 
-    public struct Colors {
+    public struct Colors: Sendable {
         public var mainBG: Color
         public var mainTint: Color
         public var mainText: Color
@@ -231,9 +239,9 @@ public struct ChatTheme {
         }
     }
 
-    public struct Images {
+    public struct Images: Sendable {
       
-        public struct Background {
+        public struct Background: Sendable {
             
             let safeAreaRegions: SafeAreaRegions
             let safeAreaEdges: Edge.Set
@@ -259,7 +267,7 @@ public struct ChatTheme {
             }
         }
 
-        public struct AttachMenu {
+        public struct AttachMenu: Sendable {
             public var camera: Image
             public var contact: Image
             public var document: Image
@@ -270,29 +278,31 @@ public struct ChatTheme {
             public var pickPhoto: Image
         }
 
-        public struct InputView {
+        public struct InputView: Sendable {
             public var add: Image
             public var arrowSend: Image
             public var sticker: Image
             public var attach: Image
             public var attachCamera: Image
             public var microphone: Image
+            public var clearText: Image
         }
 
-        public struct FullscreenMedia {
+        public struct FullscreenMedia: Sendable {
             public var play: Image
             public var pause: Image
             public var mute: Image
             public var unmute: Image
+            public var share: Image
         }
 
-        public struct MediaPicker {
+        public struct MediaPicker: Sendable {
             public var chevronDown: Image
             public var chevronRight: Image
             public var cross: Image
         }
 
-        public struct Message {
+        public struct Message: Sendable {
             public var attachedDocument: Image
             public var cancel: Image
             public var error: Image
@@ -307,7 +317,7 @@ public struct ChatTheme {
             public var sent: Image
         }
 
-        public struct MessageMenu {
+        public struct MessageMenu: Sendable {
             public var delete: Image
             public var edit: Image
             public var forward: Image
@@ -316,7 +326,7 @@ public struct ChatTheme {
             public var select: Image
         }
 
-        public struct RecordAudio {
+        public struct RecordAudio: Sendable {
             public var cancelRecord: Image
             public var deleteRecord: Image
             public var lockRecord: Image
@@ -326,7 +336,7 @@ public struct ChatTheme {
             public var stopRecord: Image
         }
 
-        public struct Reply {
+        public struct Reply: Sendable {
             public var cancelReply: Image
             public var replyToMessage: Image
         }
@@ -360,10 +370,12 @@ public struct ChatTheme {
             attach: Image? = nil,
             attachCamera: Image? = nil,
             microphone: Image? = nil,
+            clearText: Image? = nil,
             fullscreenPlay: Image? = nil,
             fullscreenPause: Image? = nil,
             fullscreenMute: Image? = nil,
             fullscreenUnmute: Image? = nil,
+            fullscreenShare: Image? = nil,
             chevronDown: Image? = nil,
             chevronRight: Image? = nil,
             cross: Image? = nil,
@@ -420,14 +432,16 @@ public struct ChatTheme {
                 sticker: sticker ?? Image("sticker", bundle: .current),
                 attach: attach ?? Image("attach", bundle: .current),
                 attachCamera: attachCamera ?? Image("attachCamera", bundle: .current),
-                microphone: microphone ?? Image("microphone", bundle: .current)
+                microphone: microphone ?? Image("microphone", bundle: .current),
+                clearText: clearText ?? Image(systemName: "xmark.circle.fill")
             )
 
             self.fullscreenMedia = FullscreenMedia(
                 play: fullscreenPlay ?? Image(systemName: "play.fill"),
                 pause: fullscreenPause ?? Image(systemName: "pause.fill"),
                 mute: fullscreenMute ?? Image(systemName: "speaker.slash.fill"),
-                unmute: fullscreenUnmute ?? Image(systemName: "speaker.fill")
+                unmute: fullscreenUnmute ?? Image(systemName: "speaker.fill"),
+                share: fullscreenShare ?? Image(systemName: "square.and.arrow.up")
             )
 
             self.mediaPicker = MediaPicker(
@@ -477,7 +491,7 @@ public struct ChatTheme {
         }
     }
     
-    public struct Style {
+    public struct Style: Sendable {
         public var replyOpacity: Double
         
         public init(replyOpacity: Double = 0.8) {

@@ -11,6 +11,7 @@
 final actor RecordingPlayer: ObservableObject {
 
     @MainActor @Published var playing = false
+    @MainActor @Published var currentURL: URL? = nil
     @MainActor @Published var duration: Double = 0.0
     @MainActor @Published var secondsLeft: Double = 0.0
     @MainActor @Published var progress: Double = 0.0
@@ -19,13 +20,16 @@ final actor RecordingPlayer: ObservableObject {
 
     private var recording: Recording? {
         didSet {
+            let newRecording = recording
             internalPlaying = false
             Task { @MainActor in
                 self.progress = 0
-                if let r = await self.recording {
+                if let r = newRecording {
+                    self.currentURL = r.url
                     self.duration = r.duration
                     self.secondsLeft = r.duration
                 } else {
+                    self.currentURL = nil
                     self.duration = 0
                     self.secondsLeft = 0
                 }
@@ -111,6 +115,7 @@ final actor RecordingPlayer: ObservableObject {
         NotificationCenter.default.removeObserver(self)
         timeObserver = nil
         player?.replaceCurrentItem(with: nil)
+        player = nil
 
         let playerItem = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: playerItem)
@@ -118,7 +123,9 @@ final actor RecordingPlayer: ObservableObject {
         NotificationCenter.default.addObserver(forName: .chatAudioIsPlaying, object: nil, queue: nil) { notification in
             if let sender = notification.object as? RecordingPlayer {
                 Task { [weak self] in
-                    if await sender.recording?.url == self?.recording?.url {
+                    let senderURL = await sender.recording?.url
+                    let selfURL = await self?.recording?.url
+                    if senderURL == selfURL {
                         return
                     }
                     await self?.pause()
@@ -140,10 +147,12 @@ final actor RecordingPlayer: ObservableObject {
 
         timeObserver = player?.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.2, preferredTimescale: 10),
-            queue: nil
+            queue: .main
         ) { time in
             Task { [weak self] in
-                guard let self, let item = await self.player?.currentItem, !item.duration.seconds.isNaN else { return }
+                guard let self, let item = await self.player?.currentItem, !item.duration.seconds.isNaN else {
+                    return
+                }
                 await MainActor.run {
                      self.updateProgress(item.duration, time)
                 }
@@ -159,6 +168,6 @@ final actor RecordingPlayer: ObservableObject {
     private func updateProgress(_ itemDuration: CMTime, _ time: CMTime) {
         duration = itemDuration.seconds
         progress = time.seconds / itemDuration.seconds
-        secondsLeft = (itemDuration - time).seconds.rounded()
+        secondsLeft = (itemDuration.seconds - time.seconds).rounded()
     }
 }

@@ -8,11 +8,14 @@ import SwiftUI
 public protocol MessageMenuAction: Equatable, CaseIterable {
     func title() -> String
     func icon() -> Image
-    
+    func isDestructive() -> Bool
+
     static func menuItems(for message: Message) -> [Self]
 }
 
 extension MessageMenuAction {
+    public func isDestructive() -> Bool { false }
+
     public static func menuItems(for message: Message) -> [Self] {
         Self.allCases.map { $0 }
     }
@@ -23,6 +26,9 @@ public enum DefaultMessageMenuAction: MessageMenuAction, Sendable {
     case copy
     case reply
     case edit(saveClosure: @Sendable (AttributedString) -> Void)
+    case share
+
+    public init() {self.init()}
 
     public func title() -> String {
         switch self {
@@ -32,6 +38,8 @@ public enum DefaultMessageMenuAction: MessageMenuAction, Sendable {
             "Reply"
         case .edit:
             "Edit"
+        case .share:
+            "Share"
         }
     }
 
@@ -47,6 +55,8 @@ public enum DefaultMessageMenuAction: MessageMenuAction, Sendable {
             } else {
                 Image(systemName: "square.and.pencil")
             }
+        case .share:
+            Image(systemName: "square.and.arrow.up")
         }
     }
 
@@ -54,7 +64,8 @@ public enum DefaultMessageMenuAction: MessageMenuAction, Sendable {
         switch (lhs, rhs) {
         case (.copy, .copy),
              (.reply, .reply),
-             (.edit(_), .edit(_)):
+             (.edit(_), .edit(_)),
+             (.share, .share):
             return true
         default:
             return false
@@ -62,14 +73,15 @@ public enum DefaultMessageMenuAction: MessageMenuAction, Sendable {
     }
 
     public static let allCases: [DefaultMessageMenuAction] = [
-        .copy, .reply, .edit(saveClosure: {_ in})
+        .copy, .reply, .edit(saveClosure: {_ in}), .share
     ]
-    
+
     static public func menuItems(for message: Message) -> [DefaultMessageMenuAction] {
-        if message.user.isCurrentUser {
-            return allCases
-        } else {
-            return [.copy, .reply]
+        var items: [DefaultMessageMenuAction] = message.user.isCurrentUser ? [.copy, .reply, .edit(saveClosure: {_ in})] : [.copy, .reply]
+        let hasShareableAttachments = message.attachments.contains { $0.fullUploadStatus == nil || $0.fullUploadStatus == .complete }
+        if hasShareableAttachments {
+            items.append(.share)
         }
+        return items
     }
 }

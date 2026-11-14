@@ -12,61 +12,40 @@ struct MessageTextView: View {
 
     @Environment(\.chatTheme) private var theme
 
-    /// If the message contains links, this property is used to correctly size the link previews, so they have the same width as the message text.
-    @State private var textSize: CGSize = .zero
-
     /// Large enough to show the domain and icon, if needed, for most pages.
     private static let minLinkPreviewWidth: CGFloat = 140
 
-    let text: String
-    let styledText: AttributedString?
-    let messageStyler: (String) -> AttributedString
+    let attributedText: AttributedString
     let userType: UserType
-    let shouldShowLinkPreview: (URL) -> Bool
-    let messageLinkPreviewLimit: Int
+    let params: MessageCustomizationParameters
 
-    var _styledText: AttributedString {
-        if let styledText { return styledText }
-        var result = text.styled(using: messageStyler)
-        result.foregroundColor = theme.colors.messageText(userType)
-
-        for (link, range) in result.runs[\.link] {
-            if link != nil {
-                result[range].underlineStyle = .single
-            }
-        }
-
-        return result
-    }
-
-    var urlsToPreview: [URL] {
-        Array(_styledText.urls.filter(shouldShowLinkPreview).prefix(messageLinkPreviewLimit))
+    var previewLinks: [URL] {
+        Array(attributedText.urls.filter(params.shouldShowPreviewForLink).prefix(params.linkPreviewLimit))
     }
 
     var body: some View {
-        if !_styledText.characters.isEmpty {
+        if !attributedText.characters.isEmpty {
             VStack(alignment: .leading) {
                 if userType == .current {
-                    Text(_styledText)
+                    Text(attributedText)
                         .tint(Color("TertiaryColor"))
-                        .sizeGetter($textSize)
-
+                        .foregroundStyle(theme.colors.messageText(userType))
                 } else {
-                    Text(_styledText)
-                        .sizeGetter($textSize)
-
+                    Text(attributedText)
+                        .foregroundStyle(theme.colors.messageText(userType))
                 }
 
-                // We use .enumerated(), and \.offset as the id, so that a message with duplicate links will show a preview for each.
-                if !urlsToPreview.isEmpty {
-                    VStack {
-                        ForEach(Array(urlsToPreview.enumerated()), id: \.offset) { _, url in
-                            LinkPillView(url: url)
+                if !previewLinks.isEmpty {
+                    VStack(alignment: userType == .current ? .trailing : .leading) {
+                        // We use .enumerated(), and \.offset as the id, so that a message with duplicate links will show a preview for each.
+                        ForEach(Array(previewLinks.enumerated()), id: \.offset) { _, url in
+                            LinkPreviewView(url: url)
                         }
                     }
-                    .frame(width: max(textSize.width, Self.minLinkPreviewWidth))
+                    .frame(minWidth: Self.minLinkPreviewWidth)
                 }
             }
+            .font(Font(params.font as CTFont))
         }
     }
 }
@@ -74,19 +53,23 @@ struct MessageTextView: View {
 struct MessageTextView_Previews: PreviewProvider {
     static var previews: some View {
         MessageTextView(
-            text: "Look at [this website](https://example.org)",
-            styledText: nil,
-            messageStyler: AttributedString.init, userType: .other,
-            shouldShowLinkPreview: { _ in true }, messageLinkPreviewLimit: 8)
+            attributedText: .init("Look at [this website](https://example.org)"), // no markdown
+            userType: .other,
+            params: MessageCustomizationParameters(
+                shouldShowPreviewForLink: { _ in true }
+            ))
         MessageTextView(
-            text: "Look at [this website](https://example.org)",
-            styledText: nil,
-            messageStyler: String.markdownStyler, userType: .other,
-            shouldShowLinkPreview: { _ in true }, messageLinkPreviewLimit: 8)
+            attributedText: "Look at [this website](https://example.org)",
+            userType: .other,
+            params: MessageCustomizationParameters(
+                shouldShowPreviewForLink: { _ in true }
+            )
+        )
         MessageTextView(
-            text: "[@Dan](mention://user/123456789) look at [this website](https://example.org)!",
-            styledText: nil,
-            messageStyler: String.markdownStyler, userType: .other,
-            shouldShowLinkPreview: { $0.scheme != "mention" }, messageLinkPreviewLimit: 8)
+            attributedText: "[@Dan](mention://user/123456789) look at [this website](https://example.org)!",
+            userType: .other,
+            params: MessageCustomizationParameters(
+                shouldShowPreviewForLink: { $0.scheme != "mention" }
+            ))
     }
 }

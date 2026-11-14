@@ -23,15 +23,13 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
 
     @Environment(\.chatTheme) private var theme
     @Environment(\.dismiss) var dismiss
-    
+    @Environment(\.chatSize) private var chatSize
+
     @StateObject private var keyboardState = KeyboardState()
     @StateObject var viewModel: ChatViewModel
-    
+
     @Binding var isShowingMenu: Bool
-    
-    /// Overall ChatView Frame
-    let chatViewFrame: CGRect = UIScreen.main.bounds
-    
+
     /// The max height for the menu
     /// - Note: menus that exceed this value will be placed in a ScrollView
     let maxMenuHeight: CGFloat = 200
@@ -65,6 +63,9 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
 
     var actionFilter: ((_ action: ActionEnum, _ message: Message)->Bool) = { _, _ in true }
 
+    /// Convenience delete button for users of the default menu who don't define a custom MessageMenuAction enum
+    var deleteClosure: ((Message) -> Void)?
+    var deleteActiveFor: ((Message) -> Bool)?
     /// The main message, rendered as a button
     var mainButton: () -> MainButton
 
@@ -111,6 +112,9 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
     @State private var messageMenuOpacity: CGFloat = 0.0
     @State private var backgroundOpacity: CGFloat = 0.0
     
+    @State private var showDestructiveAlert = false
+    @State private var pendingDestructiveAction: ActionEnum?
+
     /// This flag is used to adjust the dismiss animation
     @State private var didReact: Bool = false
     /// We use this `onReaction` handler in order to set our `didReact` flag and kick off the dismissal sequence
@@ -120,9 +124,10 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
         dismissSelf(rt)
     }
     
-    /// The max height for the entire message menu and surrounding views
+    private var chatViewFrame: CGRect { CGRect(origin: .zero, size: chatSize) }
+
     var maxEntireHeight: CGFloat {
-        self.chatViewFrame.height
+        chatViewFrame.height - UIApplication.safeArea.top - UIApplication.safeArea.bottom
     }
     
     /// Unwraps and returns our optional `UIFont` as a `Font` or `nil`
@@ -213,6 +218,20 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
                 transitionViewState(to: .keyboard)
             }
         }
+        .alert(pendingDestructiveAction?.title() ?? "Delete", isPresented: $showDestructiveAlert) {
+            Button(pendingDestructiveAction?.title() ?? "Delete", role: .destructive) {
+                if let action = pendingDestructiveAction {
+                    onAction(action)
+                } else {
+                    deleteClosure?(message)
+                }
+                pendingDestructiveAction = nil
+                dismissSelf()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDestructiveAction = nil
+            }
+        }
     }
     
     @MainActor
@@ -234,7 +253,7 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
             reactionOverviewIsVisible = shouldShowReactionOverviewView
             reactionSelectionIsVisible = shouldShowReactionSelectionView
             menuIsVisible = true
-            verticalOffset = UIScreen.main.bounds.height * 2
+            verticalOffset = chatSize.height * 2
             
             /// Kick off the background animation
             withAnimation(.easeInOut(duration: animationDuration)) {
@@ -253,7 +272,7 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
             }
             
             /// If we're in landscape mode, adjust the `horizontalOffset` appropriately
-            if UIScreen.main.bounds.width > UIScreen.main.bounds.height {
+            if chatSize.width > chatSize.height {
                 switch alignment {
                 case .left:
                     horizontalOffset = UIApplication.safeArea.leading
@@ -270,17 +289,15 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
             
             messageTopPadding = 4
             
-            /// Calculate our vertical safe area insets
-            let safeArea = UIApplication.safeArea.top + UIApplication.safeArea.bottom
             /// Calculate our ReactionOverview height
-            let rOHeight:CGFloat = reactionOverviewIsVisible ? reactionOverviewHeight : 0
+            let rOHeight: CGFloat = reactionOverviewIsVisible ? reactionOverviewHeight : 0
             /// We calculate the total height here, instead of using messageMenuFrame.height
             /// messageMenuHeight renders the menu buttons in a VStack by default, and we need to account for the clamping of the menu height
             let totalMenuHeight = calculateMessageMenuHeight(including: [.message, .reactionSelection]) + min(menuHeight, maxMenuHeight)
             /// Compare our total menu height with our free screen space to determine if we need to place it in a ScrollView or not
-            if ( totalMenuHeight + rOHeight ) > maxEntireHeight - safeArea {
+            if ( totalMenuHeight + rOHeight ) > maxEntireHeight {
                 /// We need to place our entire view in a ScrollView
-                messageMenuStyle = .scrollView(height: maxEntireHeight - safeArea)
+                messageMenuStyle = .scrollView(height: maxEntireHeight)
             } else if menuHeight > maxMenuHeight {
                 /// We need to place our menu buttons in a ScrollView
                 menuStyle = .scrollView(height: maxMenuHeight)
@@ -342,9 +359,8 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
                     /// Ensure we still need our scroll view
                     let rOHeight: CGFloat = reactionOverviewIsVisible ? reactionOverviewHeight : 0
                     let contentHeight = calculateMessageMenuHeight(including: [.message, .reactionSelection, .menu]) + rOHeight
-                    let safeArea = UIApplication.safeArea.top + UIApplication.safeArea.bottom
-                    if contentHeight > maxEntireHeight - safeArea {
-                        messageMenuStyle = .scrollView(height: maxEntireHeight - safeArea)
+                    if contentHeight > maxEntireHeight {
+                        messageMenuStyle = .scrollView(height: maxEntireHeight)
                     } else {
                         messageMenuStyle = .vStack
                     }
@@ -512,14 +528,18 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
         let buttons = ActionEnum.menuItems(for: message).filter({ actionFilter($0, message) }).enumerated().map { MenuButton(id: $0, action: $1) }
         HStack {
             if alignment == .right { Spacer() }
-            
+
             VStack {
                 ForEach(buttons) { button in
                     menuButton(title: button.action.title(), icon: button.action.icon(), action: button.action)
                 }
+
+                if deleteClosure != nil && (deleteActiveFor?(message) ?? true) {
+                    deleteMenuButton()
+                }
             }
             .menuContainer(menuStyle)
-            
+
             if alignment == .left { Spacer() }
         }
         .padding(alignment == .right ? .trailing : .leading, alignment == .right ? trailingPadding : leadingPadding)
@@ -527,30 +547,36 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
         .maxHeightGetter($menuHeight)
         .frame(maxWidth: .infinity)
     }
-    
+
     @ViewBuilder
     func menuButton(title: String, icon: Image, action: ActionEnum) -> some View {
+        let color: Color = action.isDestructive() ? .red : theme.colors.menuText
+
         HStack(spacing: 0) {
             ZStack {
                 theme.colors.messageFriendBG
                     .cornerRadius(12)
                 HStack {
                     Text(title)
-                        .foregroundColor(theme.colors.menuText)
+                        .foregroundColor(color)
                     Spacer()
                     icon
                         .renderingMode(.template)
-                        .foregroundStyle(theme.colors.menuText)
+                        .foregroundStyle(color)
                 }
                 .font(getFont)
-                .padding(.vertical, 11)
-                .padding(.horizontal, 12)
+                .padding(12, 11)
             }
             .frame(width: 208)
             .fixedSize()
             .onTapGesture {
-                onAction(action)
-                dismissSelf()
+                if action.isDestructive() {
+                    pendingDestructiveAction = action
+                    showDestructiveAlert = true
+                } else {
+                    onAction(action)
+                    dismissSelf()
+                }
             }
 
             if alignment == .right {
@@ -559,7 +585,37 @@ struct MessageMenu<MainButton: View, ActionEnum: MessageMenuAction>: View {
             }
         }
     }
-    
+
+    @ViewBuilder
+    func deleteMenuButton() -> some View {
+        HStack(spacing: 0) {
+            ZStack {
+                theme.colors.messageFriendBG
+                    .cornerRadius(12)
+                HStack {
+                    Text("Delete")
+                        .foregroundColor(.red)
+                    Spacer()
+                    Image(systemName: "trash")
+                        .renderingMode(.template)
+                        .foregroundStyle(Color.red)
+                }
+                .font(getFont)
+                .padding(12, 11)
+            }
+            .frame(width: 208)
+            .fixedSize()
+            .onTapGesture {
+                pendingDestructiveAction = nil
+                showDestructiveAlert = true
+            }
+
+            if alignment == .right {
+                Color.clear.viewWidth(12)
+            }
+        }
+    }
+
     private func dismissSelf(_ rt: ReactionType? = nil) {
         if keyboardState.isShown { keyboardState.resignFirstResponder() }
         transitionViewState(to: .dismiss)

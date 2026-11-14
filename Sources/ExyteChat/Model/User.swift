@@ -34,4 +34,13 @@ public struct User: Codable, Identifiable, Hashable, Sendable {
         self.avatarCacheKey = avatarCacheKey
         self.type = isCurrentUser ? .current : .other
     }
+
+    public init(id: String, name: String, avatarURL: URL?, avatarPlaceholderURL: URL? = nil, avatarCacheKey: String? = nil, type: UserType) {
+        self.id = id
+        self.name = name
+        self.avatarURL = avatarURL
+        self.avatarPlaceholderURL = avatarPlaceholderURL
+        self.avatarCacheKey = avatarCacheKey
+        self.type = type
+    }
 }

@@ -8,7 +8,8 @@ import SwiftUI
 struct ReactionSelectionView: View {
     
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    
+    @Environment(\.chatSize) private var chatSize
+
     static let maxSelectionRowWidth: CGFloat = 400
 
     @StateObject private var keyboardState = KeyboardState()
@@ -78,8 +79,7 @@ struct ReactionSelectionView: View {
                             }
                     }
                 }
-                .padding(.vertical, verticalPadding)
-                .padding(.horizontal, (emojiEntryIsFocused || viewState.isPicked) ? bubbleDiameter / 6 : horizontalPadding)
+                .padding((emojiEntryIsFocused || viewState.isPicked) ? bubbleDiameter / 6 : horizontalPadding, verticalPadding)
                 
             }
             .padding(.horizontal, 2)
@@ -147,7 +147,7 @@ struct ReactionSelectionView: View {
                         .foregroundStyle(selectedEmoji.isEmpty ? Color.secondary.opacity(0.35) : Color.clear)
                 }
             )
-            .frame(width: bubbleDiameter, height: bubbleDiameter)
+            .viewSize(bubbleDiameter)
     }
     
     @ViewBuilder
@@ -177,7 +177,7 @@ struct ReactionSelectionView: View {
             Color.clear.viewWidth(max(1, leadingPadding - 8))
             Spacer()
         } else {
-            let additionalPadding = max(0, UIScreen.main.bounds.width - maxSelectionRowWidth - trailingPadding)
+            let additionalPadding = max(0, chatSize.width - maxSelectionRowWidth - trailingPadding)
             Color.clear.viewWidth(additionalPadding + trailingPadding * 3)
         }
     }
@@ -188,7 +188,7 @@ struct ReactionSelectionView: View {
             Spacer()
             Color.clear.viewWidth(trailingPadding)
         } else {
-            let additionalPadding = max(0, UIScreen.main.bounds.width - maxSelectionRowWidth - leadingPadding)
+            let additionalPadding = max(0, chatSize.width - maxSelectionRowWidth - leadingPadding)
             Color.clear.viewWidth(additionalPadding + trailingPadding * 3)
         }
     }
@@ -287,16 +287,16 @@ struct ReactionSelectionView: View {
     /// - Note: If the messageFrame's width is equal to, or larger than, the Screens width then we skip the offset animation
     /// - Note: This also prevents the offset animation from occuring when the user uses a custom message builder
     private func getXOffset() -> CGFloat {
-        guard viewModel.messageFrame.width < UIScreen.main.bounds.width else { return .leastNonzeroMagnitude }
+        guard viewModel.messageFrame.width < chatSize.width else { return .leastNonzeroMagnitude }
         switch viewState {
         case .initial, .row:
             return .leastNonzeroMagnitude
         case .search, .picked:
             if alignment == .left {
-                let additionalPadding = max(0, UIScreen.main.bounds.width - maxSelectionRowWidth - leadingPadding) - UIApplication.safeArea.leading
-                return -((UIScreen.main.bounds.width - (additionalPadding + trailingPadding * 3) - (bubbleDiameter * 0.8)) - viewModel.messageFrame.maxX)
+                let additionalPadding = max(0, chatSize.width - maxSelectionRowWidth - leadingPadding) - UIApplication.safeArea.leading
+                return -((chatSize.width - (additionalPadding + trailingPadding * 3) - (bubbleDiameter * 0.8)) - viewModel.messageFrame.maxX)
             } else {
-                let additionalPadding = max(0, UIScreen.main.bounds.width - maxSelectionRowWidth - trailingPadding) - UIApplication.safeArea.leading
+                let additionalPadding = max(0, chatSize.width - maxSelectionRowWidth - trailingPadding) - UIApplication.safeArea.leading
                 return viewModel.messageFrame.minX - ((additionalPadding + trailingPadding * 3) + (bubbleDiameter * 0.8))
             }
         }
@@ -307,7 +307,7 @@ struct ReactionSelectionView: View {
     /// - Note: If the messageFrame's width is equal to, or larger than, the Screens width then we skip the offset animation
     /// - Note: This also prevents the offset animation from occuring when the user uses a custom message builder
     private func getYOffset() -> CGFloat {
-        guard viewModel.messageFrame.width < UIScreen.main.bounds.width else { return .leastNonzeroMagnitude }
+        guard viewModel.messageFrame.width < chatSize.width else { return .leastNonzeroMagnitude }
         switch viewState {
         case .initial, .row:
             return .leastNonzeroMagnitude

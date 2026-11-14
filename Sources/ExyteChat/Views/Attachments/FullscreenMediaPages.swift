@@ -10,135 +10,154 @@ struct FullscreenMediaPages: View {
     @Environment(\.chatTheme) private var theme
 
     @StateObject var viewModel: FullscreenMediaPagesViewModel
-    var safeAreaInsets: EdgeInsets
+    var showShareButton: Bool = true
     var onClose: () -> Void
 
+    @State private var shareItem: ShareItem?
+    @State private var isPreparingShare = false
+    @State private var showMinis = true
+
+    private var tintColor: Color {
+        theme.colors.mainText
+    }
+
     var body: some View {
-        let closeGesture = DragGesture()
-            .onChanged { viewModel.offset = closeSize(from: $0.translation) }
-            .onEnded {
-                withAnimation {
-                    viewModel.offset = .zero
-                }
-                if $0.translation.height >= 100 {
-                    onClose()
-                }
+        VStack(spacing: 0) {
+            if showMinis {
+                headerView
             }
 
+            mediaPagerView
+
+            if showMinis {
+                minisView
+            }
+        }
+        .background {
+            theme.colors.mainBG.ignoresSafeArea()
+        }
+        .sheet(item: $shareItem) { item in
+            ShareSheet(activityItems: [item.url])
+        }
+    }
+
+    var headerView: some View {
         ZStack {
-            theme.colors.mainBG
-                .opacity(max((200.0 - viewModel.offset.height) / 200.0, 0.5))
-            VStack {
-                TabView(selection: $viewModel.index) {
-                    ForEach(viewModel.attachments.enumerated().map({ $0 }), id: \.offset) { (index, attachment) in
-                        AttachmentsPage(attachment: attachment)
-                            .tag(index)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .allowsHitTesting(false)
-                            .ignoresSafeArea()
-                    }
-                    .ignoresSafeArea()
-                }
-                .environmentObject(viewModel)
-                .tabViewStyle(.page(indexDisplayMode: .never))
-            }
-            .offset(viewModel.offset)
-            .gesture(closeGesture)
-            .onTapGesture {
-                withAnimation {
-                    viewModel.showMinis.toggle()
-                }
-            }
-
-            VStack {
-                Spacer()
-                ScrollViewReader { proxy in
-                    if viewModel.showMinis {
-                        ScrollView(.horizontal) {
-                            HStack(spacing: 2) {
-                                ForEach(viewModel.attachments
-                                    .filter { $0.fullUploadStatus == nil || $0.fullUploadStatus == .complete  }
-                                    .enumerated().map({ $0 }), id: \.offset) { (index, attachment) in
-                                    AttachmentCell(attachment: attachment, size: CGSize(width: 100, height: 100)) { _,_ in
-                                        withAnimation {
-                                            viewModel.index = index
-                                        }
-                                    }
-                                    .cornerRadius(4)
-                                    .clipped()
-                                    .id(index)
-                                    .overlay {
-                                        if viewModel.index == index {
-                                            RoundedRectangle(cornerRadius: 4)
-                                                .stroke(theme.colors.sendButtonBackground, lineWidth: 2)
-                                        }
-                                    }
-                                    .padding(.vertical, 1)
-                                }
-                            }
-                        }
-                        .padding([.top, .horizontal], 12)
-                        .background(theme.colors.mainBG)
-                        .onAppear {
-                            proxy.scrollTo(viewModel.index)
-                        }
-                        .onChange(of: viewModel.index) { _, newValue in
-                            withAnimation {
-                                proxy.scrollTo(newValue, anchor: .center)
-                            }
-                        }
-                    }
-                }
-                .offset(y: -safeAreaInsets.bottom)
-            }
-            .offset(viewModel.offset)
-        }
-        .ignoresSafeArea()
-        .overlay(alignment: .top) {
-            if viewModel.showMinis {
-                Text("\(viewModel.index + 1)/\(viewModel.attachments.count)")
-                    .foregroundColor(theme.colors.mainText)
-                    .offset(y: safeAreaInsets.top)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if viewModel.showMinis {
+            HStack {
                 Button(action: onClose) {
                     theme.images.mediaPicker.cross
                         .imageScale(.large)
                         .padding(5)
                 }
-                .tint(theme.colors.mainText)
-                .padding(.leading, 15)
-                .offset(y: safeAreaInsets.top - 5)
+                .tint(tintColor)
+                .padding(.leading, 10)
+
+                Spacer()
+
+                HStack(spacing: 20) {
+                    if showShareButton {
+                        if isPreparingShare {
+                            ProgressView()
+                                .tint(tintColor)
+                                .viewSize(24)
+                                .padding(5)
+                        } else {
+                            controlIcon(theme.images.fullscreenMedia.share) {
+                                shareCurrentAttachment()
+                            }
+                        }
+                    }
+                }
+                .foregroundColor(tintColor)
+                .padding(.trailing, 10)
+            }
+
+            Text("\(viewModel.index + 1)/\(viewModel.attachments.count)")
+                .foregroundColor(tintColor)
+        }
+        .padding(.bottom, 8)
+    }
+
+    var mediaPagerView: some View {
+        TabView(selection: $viewModel.index) {
+            ForEach(viewModel.attachments.enumerated().map({ $0 }), id: \.offset) { (index, attachment) in
+                AttachmentsPage(attachment: attachment)
+                    .tag(index)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .overlay(alignment: .topTrailing) {
-            if viewModel.showMinis, viewModel.attachments[viewModel.index].type == .video {
-                HStack(spacing: 20) {
-                    (viewModel.videoPlaying ? theme.images.fullscreenMedia.pause : theme.images.fullscreenMedia.play)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 24, height: 24)
-                        .padding(5)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            viewModel.toggleVideoPlaying()
-                        }
+        .environmentObject(viewModel)
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .onTapGesture {
+            withAnimation {
+                showMinis.toggle()
+            }
+        }
+    }
 
-                    (viewModel.videoMuted ? theme.images.fullscreenMedia.unmute : theme.images.fullscreenMedia.mute)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 24, height: 24)
-                        .padding(5)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            viewModel.toggleVideoMuted()
+    var minisView: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 2) {
+                    ForEach(viewModel.attachments
+                        .filter { $0.fullUploadStatus == nil || $0.fullUploadStatus == .complete }
+                        .enumerated().map({ $0 }), id: \.offset) { (index, attachment) in
+                            AttachmentCell(attachment: attachment, size: CGSize(width: 100, height: 100)) { _,_ in
+                                withAnimation {
+                                    viewModel.index = index
+                                }
+                            }
+                            .cornerRadius(4)
+                            .clipped()
+                            .id(index)
+                            .overlay {
+                                if viewModel.index == index {
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(theme.colors.sendButtonBackground, lineWidth: 2)
+                                }
+                            }
+                            .padding(.vertical, 1)
                         }
                 }
-                .foregroundColor(.white)
-                .padding(.trailing, 10)
-                .offset(y: safeAreaInsets.top - 5)
+                .padding([.top, .horizontal], 12)
+            }
+            .onAppear {
+                proxy.scrollTo(viewModel.index)
+            }
+            .onChange(of: viewModel.index) { _, newValue in
+                withAnimation {
+                    proxy.scrollTo(newValue, anchor: .center)
+                }
+            }
+        }
+    }
+}
+
+private struct ShareItem: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
+
+private extension FullscreenMediaPages {
+    func controlIcon(_ image: Image, onTap: @escaping () -> Void) -> some View {
+        image
+            .resizable()
+            .scaledToFit()
+            .viewSize(24)
+            .padding(5)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+    }
+
+    func shareCurrentAttachment() {
+        guard !isPreparingShare else { return }
+        let attachment = viewModel.attachments[viewModel.index]
+        isPreparingShare = true
+        Task {
+            let url = await AttachmentSharing.prepareForSharing(attachment)
+            await MainActor.run {
+                isPreparingShare = false
+                shareItem = url.map(ShareItem.init)
             }
         }
     }

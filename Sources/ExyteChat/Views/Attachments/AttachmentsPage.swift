@@ -14,18 +14,22 @@ struct AttachmentsPage: View {
 
     var body: some View {
         if attachment.type == .image {
-            WebImage(url: attachment.full) { phase in
-                switch phase {
-                case let .success(image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                default:
-                    ActivityIndicator()
+            ZoomableContainer {
+                WebImage(url: attachment.full) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    default:
+                        ActivityIndicator()
+                    }
                 }
             }
         } else if attachment.type == .video {
             VideoView(viewModel: VideoViewModel(attachment: attachment))
+        } else if attachment.type == .document {
+            documentView
         } else {
             Rectangle()
                 .foregroundColor(Color.gray)
@@ -34,6 +38,27 @@ struct AttachmentsPage: View {
                 .overlay {
                     Text("Unknown", bundle: .module)
                 }
+        }
+    }
+
+    private var documentView: some View {
+        VStack(spacing: 16) {
+            theme.images.message.attachedDocument
+                .sizeAndColor(64, theme.colors.mainTint)
+
+            Text(attachment.fileName ?? attachment.full.lastPathComponent)
+                .foregroundColor(theme.colors.mainText)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+
+            Button {
+                UIApplication.shared.open(attachment.full)
+            } label: {
+                Text("Open", bundle: .module)
+                    .padding(20, 10)
+                    .background(Capsule().fill(theme.colors.mainText.opacity(0.15)))
+                    .foregroundColor(theme.colors.mainText)
+            }
         }
     }
 }

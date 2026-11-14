@@ -5,12 +5,19 @@
 import Foundation
 import Combine
 import UIKit
+import SwiftUI
 
 @MainActor
 final class ChatViewModel: ObservableObject {
 
     @Published private(set) var fullscreenAttachmentItem: Optional<Attachment> = nil
     @Published var fullscreenAttachmentPresented = false
+
+    @Published private(set) var fullscreenLocationMessageId: String? = nil
+    @Published var fullscreenLocationPresented = false
+
+    @Published var shareAttachmentsItem: ShareAttachmentsItem? = nil
+    @Published private(set) var isPreparingAttachmentsShare = false
 
     @Published var messageMenuRow: MessageRow?
     
@@ -22,11 +29,30 @@ final class ChatViewModel: ObservableObject {
     /// - Note: Used when launching the MessageMenu
     
     let inputFieldId = UUID()
+    let messageRecordingPlayer = RecordingPlayer()
 
     var didSendMessage: (DraftMessage) -> Void = {_ in }
     var didUpdateAttachmentStatus: (AttachmentUploadUpdate) -> Void = { _ in }
     var inputViewModel: InputViewModel?
     var globalFocusState: GlobalFocusState?
+
+    let liveLocationBroadcaster = LiveLocationBroadcaster()
+    private var liveLocationCancellable: AnyCancellable?
+
+    init() {
+        // forward the broadcaster's changes so views observing just `ChatViewModel` still refresh
+        // (e.g. the "sharing live location" banner)
+        liveLocationCancellable = liveLocationBroadcaster.objectWillChange
+            .sink { [weak self] in self?.objectWillChange.send() }
+    }
+
+    func startLiveLocationSharing(messageId: String, liveLocation: LiveLocation) {
+        liveLocationBroadcaster.start(messageId: messageId, startedAt: liveLocation.startedAt, expiresAt: liveLocation.expiresAt)
+    }
+
+    func stopLiveLocationSharing() {
+        liveLocationBroadcaster.finish()
+    }
 
     func presentAttachmentFullScreen(_ attachment: Attachment) {
         fullscreenAttachmentItem = attachment
@@ -37,9 +63,32 @@ final class ChatViewModel: ObservableObject {
         fullscreenAttachmentPresented = false
         fullscreenAttachmentItem = nil
     }
+
+    func presentFullscreenLocation(_ messageId: String) {
+        fullscreenLocationMessageId = messageId
+        fullscreenLocationPresented = true
+    }
+
+    func dismissFullscreenLocation() {
+        fullscreenLocationMessageId = nil
+        fullscreenLocationPresented = false
+    }
+
+    func shareAttachments(_ attachments: [Attachment]) {
+        guard !attachments.isEmpty, !isPreparingAttachmentsShare else { return }
+        isPreparingAttachmentsShare = true
+        Task { [weak self] in
+            let urls = await AttachmentSharing.prepareForSharing(attachments)
+            guard let self else { return }
+            self.isPreparingAttachmentsShare = false
+            if !urls.isEmpty {
+                self.shareAttachmentsItem = ShareAttachmentsItem(urls: urls)
+            }
+        }
+    }
     
     func updateAttachmentStatus(_ uploadUpdate: AttachmentUploadUpdate) {
-      didUpdateAttachmentStatus(uploadUpdate)
+        didUpdateAttachmentStatus(uploadUpdate)
     }
 
     func sendMessage(_ message: DraftMessage) {
@@ -52,18 +101,32 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    func focusTheInputTextView() {
+        globalFocusState?.focus = .uuid(inputFieldId)
+    }
+
     func messageMenuActionInternal(message: Message, action: DefaultMessageMenuAction) {
         switch action {
         case .copy:
-            UIPasteboard.general.string = message.text
+            UIPasteboard.general.string = String(message.attributedText.characters)
         case .reply:
-            inputViewModel?.attachments.replyMessage = message.toReplyMessage()
-            globalFocusState?.focus = .uuid(inputFieldId)
+            withAnimation(.easeInOut(duration: 0.2)) {
+                inputViewModel?.attachments.replyMessage = message.toReplyMessage()
+            }
+            focusTheInputTextView()
         case .edit(let saveClosure):
             inputViewModel?.text = message.text
-            inputViewModel?.attributedText = message.styledText ?? AttributedString(message.text)
+            inputViewModel?.attributedText = message.attributedText
             inputViewModel?.edit(saveClosure)
-            globalFocusState?.focus = .uuid(inputFieldId)
+            focusTheInputTextView()
+        case .share:
+            let shareableAttachments = message.attachments.filter { $0.fullUploadStatus == nil || $0.fullUploadStatus == .complete }
+            shareAttachments(shareableAttachments)
         }
     }
+}
+
+struct ShareAttachmentsItem: Identifiable {
+    let id = UUID()
+    let urls: [URL]
 }

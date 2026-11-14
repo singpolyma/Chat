@@ -12,7 +12,7 @@ extension MessageView {
         let preparedReactions = prepareReactions(message: message, maxReactions: maxReactions)
         let overflowBubbleText = "+\(message.reactions.count - maxReactions + 1)"
         
-        HStack(spacing: -bubbleSize.width / 5) {
+        HStack(spacing: -reactionViewWidth / 5) {
             if !message.user.isCurrentUser {
                 overflowBubbleView(
                     leadingSpacer: true,
@@ -23,10 +23,9 @@ extension MessageView {
             }
             
             ForEach(Array(preparedReactions.reactions.enumerated()), id: \.element) { index, reaction in
-                ReactionBubble(reaction: reaction, font: Font(font))
+                ReactionBubble(reaction: reaction, font: params.font)
                     .transition(.scaleAndFade)
                     .zIndex(message.user.isCurrentUser ? Double(preparedReactions.reactions.count - index) : Double(index + 1))
-                    .sizeGetter($bubbleSize)
             }
             
             if message.user.isCurrentUser {
@@ -39,13 +38,13 @@ extension MessageView {
             }
         }
         .offset(
-            x: message.user.isCurrentUser ? -(bubbleSize.height / 2) : (bubbleSize.height / 2),
+            x: message.user.isCurrentUser ? -(reactionViewWidth / 2) : (reactionViewWidth / 2),
             y: 0
         )
     }
     
     @ViewBuilder
-    func overflowBubbleView(leadingSpacer:Bool, needsOverflowBubble:Bool, text:String, containsReactionFromCurrentUser:Bool) -> some View {
+    func overflowBubbleView(leadingSpacer: Bool, needsOverflowBubble: Bool, text: String, containsReactionFromCurrentUser: Bool) -> some View {
         if needsOverflowBubble {
             ReactionBubble(
                 reaction: .init(
@@ -58,7 +57,7 @@ extension MessageView {
                     type: .emoji(text),
                     status: .sent
                 ),
-                font: .footnote.weight(.light)
+                font: params.font
             )
             .padding(message.user.isCurrentUser ? .trailing : .leading, -3)
         }
@@ -66,16 +65,16 @@ extension MessageView {
     
     struct PreparedReactions {
         /// Sorted Reactions by most recent -> oldest (trimmed to maxReactions)
-        let reactions:[Reaction]
+        let reactions: [Reaction]
         /// Indicates whether we need to add an overflow bubble (due to the number of Reactions exceeding maxReactions)
-        let needsOverflowBubble:Bool
+        let needsOverflowBubble: Bool
         /// Indicates whether the clipped reactions (oldest reactions beyond maxReaction) contain a reaction from the current user
         /// - Note: This value is used to color the background of the overflow bubble
-        let overflowContainsCurrentUser:Bool
+        let overflowContainsCurrentUser: Bool
     }
     
     /// Orders the reactions by most recent to oldest, reverses their layout based on alignment and determines if an overflow bubble is necessary
-    private func prepareReactions(message:Message, maxReactions:Int) -> PreparedReactions {
+    private func prepareReactions(message: Message, maxReactions: Int) -> PreparedReactions {
         guard maxReactions > 1, !message.reactions.isEmpty else {
             return .init(reactions: [], needsOverflowBubble: false, overflowContainsCurrentUser: false)
         }
@@ -104,8 +103,10 @@ struct ReactionBubble: View {
     @Environment(\.chatTheme) var theme
     
     let reaction: Reaction
-    let font: Font
-    
+    let font: UIFont
+
+    static let padding: CGFloat = 6
+
     @State private var phase = 0.0
     
     var fillColor: Color {
@@ -128,10 +129,10 @@ struct ReactionBubble: View {
     
     var body: some View {
         Text(reaction.emoji ?? "?")
-            .font(font)
+            .font(Font(font))
             .opacity(opacity)
             .foregroundStyle(theme.colors.messageText(reaction.user.type))
-            .padding(6)
+            .padding(ReactionBubble.padding)
             .background(
                 ZStack {
                     Circle()

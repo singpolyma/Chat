@@ -1,0 +1,95 @@
+//
+//  ChatCustomizationParameters.swift
+//  Chat
+//
+//  Created by Alisa Mylnikova on 02.04.2026.
+//
+
+import SwiftUI
+import ExyteMediaPicker
+
+struct ChatCustomizationParameters {
+    var isListAboveInputView: Bool = true
+    var showScrollToBottomButton: Bool = true
+    var showNetworkConnectionProblem: Bool = false
+    var showDateHeaders: Bool = true
+    var isScrollEnabled: Bool = true
+    var autoFocusTextInputOnChatOpen: Bool = false
+    var showMessageMenuOnLongPress: Bool = true
+    var showShareAttachmentButton: Bool = true
+    var showLastReadIndicator: Bool = false
+    var keyboardDismissMode: UIScrollView.KeyboardDismissMode = .none
+    var messageMenuAnimationDuration: CGFloat = 0.3
+    var contentInsets: UIEdgeInsets = .zero
+
+    var scrollToParams: ScrollToParams?
+    var onContentOffsetChange: ((CGFloat) -> Void)? // Internal → External
+    var onWillDisplayCell: ((Message) -> Void)?
+    var onTransactionReady: ((TableUpdateTransaction) -> Void)?
+    var onLiveLocationBroadcast: ((LiveLocationBroadcastEvent) -> Void)?
+
+    var olderMessagesPaginationHandler: PaginationHandler?
+    var newerMessagesPaginationHandler: PaginationHandler?
+    var localization = ChatLocalization.defaultLocalization // these can be localized in the Localizable.strings files
+    var reactionDelegate: ReactionDelegate?
+    var listSwipeActions = ListSwipeActions()
+}
+
+public struct ScrollToParams: Equatable {
+    public enum ScrollTo: Equatable {
+        case messageID(messageID: String, position: UITableView.ScrollPosition, offset: CGFloat)
+        case tableOffset(CGFloat)
+        case newestMessage
+        case oldestMessage
+    }
+
+    let scrollTo: ScrollTo
+
+    public init(messageID: String, position: UITableView.ScrollPosition, offset: CGFloat = 0) {
+        self.scrollTo = .messageID(messageID: messageID, position: position, offset: offset)
+    }
+
+    public init(offset: CGFloat) {
+        self.scrollTo = .tableOffset(offset)
+    }
+
+    public init(_ scrollTo: ScrollTo) {
+        self.scrollTo = scrollTo
+    }
+}
+
+struct MessageCustomizationParameters {
+    var showTimeView = true
+    var showUsername = false
+    var linkPreviewLimit = 1
+    var shouldShowPreviewForLink: (URL) -> Bool = { _ in true }
+    var font = UIFontMetrics.default.scaledFont(for: UIFont.systemFont(ofSize: 15))
+    var timeFont = UIFontMetrics.default.scaledFont(for: UIFont.systemFont(ofSize: 10))
+
+    // avatar
+    var showAvatar = true
+    var avatarSize: CGFloat = 32
+    var tapAvatarClosure: ChatView.TapAvatarClosure?
+    var avatarBuilder: ((User)->(AnyView))?
+}
+
+struct InputViewCustomizationParameters {
+    var externalInputText: String? // External → Internal
+    var onInputTextChange: ((String) -> Void)? // Internal → External
+    var availableInputs: [AvailableInputType] = [.text, .audio, .media]
+    var recorderSettings = RecorderSettings()
+    var audioRecordingMode: AudioRecordingMode = .holdToRecord
+    var mediaPickerParameters = MediaPickerParameters()
+    var photoPickerBackend: PhotoPickerBackend = .custom
+}
+
+public typealias MediaPickerParameters = ExyteMediaPicker.MediaPickerCutomizationParameters
+
+/// Which photo/video picker is presented when the user taps to attach media.
+public enum PhotoPickerBackend: Sendable, Equatable {
+    /// ExyteMediaPicker fully customizable built-in media picker (default)
+    case custom
+    /// Apple's native PhotosPicker
+    /// Camera capture always uses the ExyteMediaPicker regardless of this setting.
+    case system
+}

@@ -6,51 +6,49 @@
 //
 
 import SwiftUI
+import Combine
 
-public extension Notification.Name {
-    static let onScrollToBottom = Notification.Name("onScrollToBottom")
-}
+struct UIList<MessageContent: View>: UIViewRepresentable {
 
-struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
-
-    typealias MessageBuilderClosure = ChatView<MessageContent, InputView, DefaultMessageMenuAction>.MessageBuilderClosure
+    typealias MessageBuilderParamsClosure = ChatView<MessageContent, InputView, DefaultMessageMenuAction>.MessageBuilderParamsClosure
 
     @Environment(\.chatTheme) var theme
 
     @ObservedObject var viewModel: ChatViewModel
     @ObservedObject var inputViewModel: InputViewModel
 
+    @Binding var pendingScrollTo: ScrollToParams?
     @Binding var isScrolledToBottom: Bool
-    @Binding var shouldScrollToTop: () -> ()
     @Binding var tableContentHeight: CGFloat
 
-    var messageBuilder: MessageBuilderClosure?
-    var mainHeaderBuilder: (()->AnyView)?
-    var headerBuilder: ((Date)->AnyView)?
-    var inputView: InputView
+    // MARK: - View builders
+
+    let messageBuilder: MessageBuilderParamsClosure
+    let mainHeaderBuilder: (()->AnyView)?
+    let dateHeaderBuilder: ((Date)->AnyView)?
+
+    // MARK: - Data / type
 
     let type: ChatType
-    let showDateHeaders: Bool
-    let isScrollEnabled: Bool
-    let avatarSize: CGFloat
-    let showMessageMenuOnLongPress: Bool
-    let tapAvatarClosure: ChatView.TapAvatarClosure?
-    let paginationHandler: PaginationHandler?
-    let messageStyler: (String) -> AttributedString
-    let shouldShowLinkPreview: (URL) -> Bool
-    let showMessageTimeView: Bool
-    let messageLinkPreviewLimit: Int
-    let messageFont: UIFont
     let sections: [MessagesSection]
     let ids: [String]
-    let listSwipeActions: ListSwipeActions
-    let keyboardDismissMode: UIScrollView.KeyboardDismissMode
 
-    @State var isScrolledToTop = false
-    @State var updateQueue = UpdateQueue()
+    // MARK: - Customization
+
+    let chatParams: ChatCustomizationParameters
+    let messageParams: MessageCustomizationParameters
+
+    // MARK: - State
+
+    @State private var isScrolledToTop = false
+    @State private var updateQueue = UpdateQueue()
+    @State private var transaction = TableUpdateTransaction()
+
+    @State private var cancellables = Set<AnyCancellable>()
 
     func makeUIView(context: Context) -> UITableView {
-        let tableView = UITableView(frame: .zero, style: .grouped)
+        let style = mainHeaderBuilder != nil || chatParams.showDateHeaders ? UITableView.Style.grouped : .plain
+        let tableView = UITableView(frame: .zero, style: style)
         tableView.translatesAutoresizingMaskIntoConstraints = false
         tableView.separatorStyle = .none
         tableView.dataSource = context.coordinator
@@ -61,153 +59,320 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
         tableView.showsVerticalScrollIndicator = false
         tableView.estimatedSectionHeaderHeight = 1
         tableView.estimatedSectionFooterHeight = UITableView.automaticDimension
-        tableView.backgroundColor = UIColor(theme.colors.mainBG)
+        tableView.backgroundColor = UIColor(theme.contentBG)
         tableView.scrollsToTop = false
-        tableView.isScrollEnabled = isScrollEnabled
-        tableView.keyboardDismissMode = keyboardDismissMode
+        tableView.isScrollEnabled = chatParams.isScrollEnabled
+        tableView.keyboardDismissMode = chatParams.keyboardDismissMode
+        tableView.sectionHeaderTopPadding = 0
+        tableView.sectionHeaderHeight = 0
+        tableView.sectionFooterHeight = 0
+        tableView.tableHeaderView = nil
+        tableView.tableFooterView = UIView(frame: .zero)
 
-        NotificationCenter.default.addObserver(forName: .onScrollToBottom, object: nil, queue: nil) { _ in
-            DispatchQueue.main.async {
-                if !context.coordinator.sections.isEmpty {
-                    guard tableView.numberOfSections > 0, tableView.numberOfRows(inSection: 0) > 0 else { return }
-                    tableView.scrollToRow(at: IndexPath(row: 0, section: 0), at: .bottom, animated: true)
-                }
-            }
-        }
-
-        DispatchQueue.main.async {
-            shouldScrollToTop = {
-                tableView.contentOffset = CGPoint(x: 0, y: tableView.contentSize.height - tableView.frame.height)
-            }
-        }
+        transaction.updateQueue = updateQueue
+        chatParams.onTransactionReady?(transaction)
 
         return tableView
     }
 
     func updateUIView(_ tableView: UITableView, context: Context) {
-        if !isScrollEnabled {
+        if !chatParams.isScrollEnabled {
             DispatchQueue.main.async {
                 tableContentHeight = tableView.contentSize.height
             }
         }
 
-        if context.coordinator.sections == sections {
-            return
+        if tableView.contentInset != chatParams.contentInsets {
+            tableView.contentInset = chatParams.contentInsets
         }
 
+        context.coordinator.chatParams = chatParams
+
+        let needToUpdateSections = context.coordinator.latestUpdateSections != sections
+        let needToScroll = pendingScrollTo != nil
+
+        //print("changes animationMode: \(animationMode) needToUpdateSections: \(needToUpdateSections), needToScroll: \(needToScroll), pendingScrollTo: \(pendingScrollTo)")
+
+        guard needToUpdateSections || needToScroll else { return }
+
+        context.coordinator.latestUpdateSections = sections
+        context.coordinator.updateInProgress = true
+
         Task {
-            await updateQueue.enqueue() {
-                await updateIfNeeded(coordinator: context.coordinator, tableView: tableView)
+            let animationMode = await updateQueue.getAnimationMode()
+            await updateQueue.markRealUpdate()
+
+            await updateQueue.createJob {
+                if needToUpdateSections {
+                    if animationMode == .none
+                        || context.coordinator.sections.isEmpty
+                        || pendingScrollTo != nil { // if we're gonna scroll later, then update cells without animation, and animate scrolling later
+                        updateTableNoAnimation(tableView, context.coordinator)
+                    } else if animationMode == .natural, tableView.contentOffset == .zero {
+                        await updateTableWithAnimation(tableView, context.coordinator)
+                    } else {
+                        // if transaction.animationMode == .keepStable
+                        // || (transaction.animationMode == .natural && tableView.contentOffset != .zero) {
+                        await performInsertPreservingOffset(tableView, context.coordinator)
+                    }
+                }
+
+                if needToScroll, let scrollToParams = pendingScrollTo {
+                    pendingScrollTo = nil // reset to only scroll once
+
+                    let perform = {
+                        performScrollTo(tableView, scrollToParams: scrollToParams)
+                    }
+
+                    if animationMode == .natural {
+                        await withCheckedContinuation { continuation in
+                            UIView.animate(withDuration: 0.25) {
+                                perform()
+                            } completion: { _ in
+                                continuation.resume()
+                            }
+                        }
+                    } else {
+                        perform()
+                    }
+                }
+
+                tableView.beginUpdates()
+                context.coordinator.updateInProgress = false
+                context.coordinator.paginationState.olderInProgress = false
+                context.coordinator.paginationState.newerInProgress = false
+                tableView.endUpdates()
+                tableView.relayoutHeadersFooters()
             }
         }
     }
 
+    // MARK: scroll to
+
+    func performScrollTo(_ tableView: UITableView, scrollToParams: ScrollToParams) {
+        switch scrollToParams.scrollTo {
+        case .messageID(let messageID, let position, let offset):
+            scrollToRow(tableView, messageID: messageID, position: position, additionalOffset: offset)
+        case .tableOffset(let offset):
+            tableView.setContentOffset(CGPoint(x: 0, y: offset), animated: false)
+        case .newestMessage:
+            tableView.setContentOffset(CGPoint(x: 0, y: 0), animated: false)
+        case .oldestMessage:
+            // An empty table has no section 0 to ask about: clamping the index
+            // to 0 makes numberOfRows(inSection:) raise
+            // "Requested the number of rows for section (0) which is out of bounds".
+            guard tableView.numberOfSections > 0 else { return }
+
+            let lastSection = tableView.numberOfSections - 1
+            let lastRow = tableView.numberOfRows(inSection: lastSection) - 1
+
+            guard lastRow >= 0 else { return }
+
+            tableView.scrollToRow(
+                at: IndexPath(row: lastRow, section: lastSection),
+                at: .bottom,
+                animated: false
+            )
+        }
+    }
+
     @MainActor
-    private func updateIfNeeded(coordinator: Coordinator, tableView: UITableView) async {
-        if coordinator.sections == sections {
-            return
+    func scrollToRow(_ tableView: UITableView, messageID: String, position: UITableView.ScrollPosition, additionalOffset: CGFloat) {
+        let indicatorIP = UIList.lastReadIndicatorIndexPath(sections: sections, enabled: chatParams.showLastReadIndicator)
+        guard let indexPath = indexPath(for: messageID, in: sections, indicatorIndexPath: indicatorIP),
+              let rect = tableView.rectForRow(at: indexPath) as CGRect? else { return }
+
+        let adjustedPosition =
+        (position == .middle || type == .comments) ? position
+        : position == .bottom ? .top: .bottom
+
+        let baseY: CGFloat
+        switch adjustedPosition {
+        case .top:
+            baseY = rect.minY - tableView.adjustedContentInset.top
+        case .middle:
+            baseY = rect.midY - tableView.bounds.height / 2
+        default:
+            baseY = rect.maxY - tableView.bounds.height + tableView.adjustedContentInset.bottom
         }
 
-        if coordinator.sections.isEmpty {
-            coordinator.sections = sections
-            tableView.reloadData()
-            if !isScrollEnabled {
-                DispatchQueue.main.async {
-                    tableContentHeight = tableView.contentSize.height
+        let targetY = baseY + additionalOffset
+
+        let minOffset = -tableView.adjustedContentInset.top
+        let maxOffset = tableView.contentSize.height - tableView.bounds.height + tableView.adjustedContentInset.bottom
+
+        let clampedY = max(minOffset, min(targetY, maxOffset))
+
+        tableView.setContentOffset(CGPoint(x: 0, y: clampedY), animated: false)
+    }
+
+    static func lastReadIndicatorIndexPath(sections: [MessagesSection], enabled: Bool) -> IndexPath? {
+        guard enabled else { return nil }
+        for (si, section) in sections.enumerated() {
+            for (ri, row) in section.rows.enumerated() {
+                if case .readBy = row.message.status, si > 0 || ri > 0 {
+                    return IndexPath(row: ri, section: si)
                 }
             }
-            return
+        }
+        return nil
+    }
+
+    func indexPath(for id: String, in sections: [MessagesSection], indicatorIndexPath: IndexPath? = nil) -> IndexPath? {
+        for (sectionIndex, section) in sections.enumerated() {
+            if let rowIndex = section.rows.firstIndex(where: { $0.message.id == id }) {
+                if let ip = indicatorIndexPath, ip.section == sectionIndex, rowIndex >= ip.row {
+                    return IndexPath(row: rowIndex + 1, section: sectionIndex)
+                }
+                return IndexPath(row: rowIndex, section: sectionIndex)
+            }
+        }
+        return nil
+    }
+
+    // MARK: update table
+
+    func performInsertPreservingOffset(_ tableView: UITableView, _ coordinator: Coordinator) async {
+        let oldIndicatorIP = UIList.lastReadIndicatorIndexPath(sections: coordinator.sections, enabled: chatParams.showLastReadIndicator)
+
+        // Skip the indicator row — it has no backing message to preserve by ID
+        let visibleIndexPaths = tableView.indexPathsForVisibleRows ?? []
+        guard let firstVisibleIndexPath = visibleIndexPaths.first(where: { $0 != oldIndicatorIP }),
+              let preservedVisibleRect = tableView.rectForRow(at: firstVisibleIndexPath) as CGRect? else { return }
+
+        let dataRow = adjustedDataRow(firstVisibleIndexPath.row, section: firstVisibleIndexPath.section, indicator: oldIndicatorIP)
+        let firstVisibleRow = coordinator.sections[firstVisibleIndexPath.section].rows[dataRow]
+        let preservedVisibleMessageID = firstVisibleRow.message.id
+        let preservedOffset = tableView.contentOffset.y
+
+        coordinator.sections = sections
+
+        CATransaction.setDisableActions(true)
+
+        tableView.reloadData()
+        tableView.layoutIfNeeded()
+
+        let newIndicatorIP = UIList.lastReadIndicatorIndexPath(sections: sections, enabled: chatParams.showLastReadIndicator)
+        guard let newIndexPath = indexPath(for: preservedVisibleMessageID, in: sections, indicatorIndexPath: newIndicatorIP) else { return }
+        let newRectForCell = tableView.rectForRow(at: newIndexPath)
+        let newOffset = preservedOffset + (newRectForCell.minY - preservedVisibleRect.minY)
+        tableView.setContentOffset(CGPoint(x: 0, y: newOffset), animated: false)
+
+        tableView.relayoutHeadersFooters()
+    }
+
+    private func adjustedDataRow(_ tableRow: Int, section: Int, indicator: IndexPath?) -> Int {
+        guard let ip = indicator, ip.section == section, tableRow > ip.row else { return tableRow }
+        return tableRow - 1
+    }
+
+    @MainActor
+    private func updateTableNoAnimation(_ tableView: UITableView, _ coordinator: Coordinator) {
+        coordinator.sections = sections
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+
+        UIView.performWithoutAnimation {
+            tableView.reloadData()
+            tableView.layoutIfNeeded()
         }
 
-        if let lastSection = sections.last {
-            coordinator.paginationTargetIndexPath = IndexPath(row: lastSection.rows.count - 1, section: sections.count - 1)
-        }
+        CATransaction.commit()
+    }
 
+    @MainActor
+    private func updateTableWithAnimation(_ tableView: UITableView, _ coordinator: Coordinator) async {
         let prevSections = coordinator.sections
-        //print("0 whole sections:", runID, "\n")
-        //print("whole previous:\n", formatSections(prevSections), "\n")
         let splitInfo = await performSplitInBackground(prevSections, sections)
-        await applyUpdatesToTable(tableView, splitInfo: splitInfo) {
+        await applyOperations(tableView, splitInfo: splitInfo, prevSections: prevSections) {
             coordinator.sections = $0
         }
     }
 
-    nonisolated private func performSplitInBackground(_  prevSections:  [MessagesSection], _ sections: [MessagesSection]) async -> SplitInfo {
-        await withCheckedContinuation { continuation in
-            Task.detached {
-                let result = operationsSplit(oldSections: prevSections, newSections: sections)
-                continuation.resume(returning: result)
-            }
-        }
+    nonisolated private func performSplitInBackground(_ prevSections: [MessagesSection], _ sections: [MessagesSection]) async -> SplitInfo {
+        await Task.detached {
+            SplitInfo.operationsSplit(oldSections: prevSections, newSections: sections)
+        }.value
     }
 
     @MainActor
-    private func applyUpdatesToTable(_ tableView: UITableView, splitInfo: SplitInfo, updateContextClosure: ([MessagesSection])->()) async {
+    private func applyOperations(_ tableView: UITableView, splitInfo: SplitInfo, prevSections: [MessagesSection], updateContextClosure: ([MessagesSection])->()) async {
         // step 0: preparation
         // prepare intermediate sections and operations
-        //print("whole appliedDeletes:\n", formatSections(splitInfo.appliedDeletes), "\n")
-        //print("whole appliedDeletesSwapsAndEdits:\n", formatSections(splitInfo.appliedDeletesSwapsAndEdits), "\n")
-        //print("whole final sections:\n", formatSections(sections), "\n")
-
-        //print("operations delete:\n", splitInfo.deleteOperations.map { $0.description })
-        //print("operations swap:\n", splitInfo.swapOperations.map { $0.description })
-        //print("operations edit:\n", splitInfo.editOperations.map { $0.description })
-        //print("operations insert:\n", splitInfo.insertOperations.map { $0.description })
+//        print("whole appliedDeletes:\n", formatSections(splitInfo.appliedDeletes), "\n")
+//        print("whole appliedDeletesSwapsAndEdits:\n", formatSections(splitInfo.appliedDeletesSwapsAndEdits), "\n")
+//        print("whole final sections:\n", formatSections(sections), "\n")
+//
+//        print("operations delete:\n", splitInfo.deleteOperations.map { $0.description })
+//        print("operations swap:\n", splitInfo.swapOperations.map { $0.description })
+//        print("operations edit:\n", splitInfo.editOperations.map { $0.description })
+//        print("operations insert:\n", splitInfo.insertOperations.map { $0.description })
 
         await performBatchTableUpdates(tableView) {
             // step 1: deletes
-            // delete sections and rows if necessary
-            //print("1 apply deletes", runID)
+            let deleteIndicatorIP = UIList.lastReadIndicatorIndexPath(sections: prevSections, enabled: chatParams.showLastReadIndicator)
             updateContextClosure(splitInfo.appliedDeletes)
-            //context.coordinator.sections = appliedDeletes
             for operation in splitInfo.deleteOperations {
-                applyOperation(operation, tableView: tableView)
+                applyOperation(operation, tableView: tableView, indicatorIndexPath: deleteIndicatorIP)
             }
         }
-        //print("1 finished deletes", runID)
 
         await performBatchTableUpdates(tableView) {
             // step 2: swaps
-            // swap places for rows that moved inside the table
-            // (example of how this happens. send two messages: first m1, then m2. if m2 is delivered to server faster, then it should jump above m1 even though it was sent later)
-            //print("2 apply swaps", runID)
-            updateContextClosure(splitInfo.appliedDeletesSwapsAndEdits) // NOTE: this array already contains necessary edits, but won't be a problem for appplying swaps
+            let swapIndicatorIP = UIList.lastReadIndicatorIndexPath(sections: splitInfo.appliedDeletes, enabled: chatParams.showLastReadIndicator)
+            updateContextClosure(splitInfo.appliedDeletesSwapsAndEdits)
             for operation in splitInfo.swapOperations {
-                applyOperation(operation, tableView: tableView)
+                applyOperation(operation, tableView: tableView, indicatorIndexPath: swapIndicatorIP)
             }
         }
-        //print("2 finished swaps", runID)
 
-        UIView.setAnimationsEnabled(false)
         await performBatchTableUpdates(tableView) {
             // step 3: edits
-            // check only sections that are already in the table for existing rows that changed and apply only them to table's dataSource without animation
-            //print("3 apply edits", runID)
+            let editIndicatorIP = UIList.lastReadIndicatorIndexPath(sections: splitInfo.appliedDeletesSwapsAndEdits, enabled: chatParams.showLastReadIndicator)
             updateContextClosure(splitInfo.appliedDeletesSwapsAndEdits)
-
             for operation in splitInfo.editOperations {
-                applyOperation(operation, tableView: tableView)
+                applyOperation(operation, tableView: tableView, indicatorIndexPath: editIndicatorIP)
             }
         }
-        UIView.setAnimationsEnabled(true)
-        //print("3 finished edits", runID)
 
-        if isScrolledToBottom || isScrolledToTop {
-            // step 4: inserts
-            // apply the rest of the changes to table's dataSource, i.e. inserts
-            //print("4 apply inserts", runID)
-            updateContextClosure(sections)
+        // step 4: inserts
+        let prevIndicatorIP = UIList.lastReadIndicatorIndexPath(sections: splitInfo.appliedDeletesSwapsAndEdits, enabled: chatParams.showLastReadIndicator)
+        let insertIndicatorIP = UIList.lastReadIndicatorIndexPath(sections: sections, enabled: chatParams.showLastReadIndicator)
+        updateContextClosure(sections)
 
-            tableView.beginUpdates()
+        let animated = isScrolledToBottom || isScrolledToTop
+        await performBatchTableUpdates(tableView) {
             for operation in splitInfo.insertOperations {
-                applyOperation(operation, tableView: tableView)
-            }
-            tableView.endUpdates()
-            //print("4 finished inserts", runID)
+                applyOperation(operation, tableView: tableView, animateInserts: animated, indicatorIndexPath: insertIndicatorIP)
 
-            if !isScrollEnabled {
-                tableContentHeight = tableView.contentSize.height
+                // When a section is inserted, UITableView uses its cached row counts as "before".
+                // If the indicator moves away from an existing section to the new one (or disappears),
+                // that section silently loses a virtual row — UITableView sees this as inconsistent.
+                // Explicitly delete the virtual indicator row so the before→after counts stay valid.
+                if case .insertSection(let newSection) = operation, let oldIP = prevIndicatorIP {
+                    let shiftedSection = newSection <= oldIP.section ? oldIP.section + 1 : oldIP.section
+                    if insertIndicatorIP?.section != shiftedSection {
+                        tableView.deleteRows(at: [IndexPath(row: oldIP.row, section: oldIP.section)], with: .none)
+                    }
+                }
             }
+        }
+        //print("4 finished inserts")
+
+        tableView.relayoutHeadersFooters()
+
+        if !chatParams.isScrollEnabled {
+            tableContentHeight = tableView.contentSize.height
+        }
+    }
+
+    private func isSectionOperation(_ operation: Operation) -> Bool {
+        switch operation {
+        case .deleteSection, .insertSection:
+            return true
+        case .delete, .insert, .swap, .edit, .editChangingHeight:
+            return false
         }
     }
 
@@ -217,10 +382,12 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
         case deleteSection(Int)
         case insertSection(Int)
 
-        case delete(Int, Int) // delete with animation
-        case insert(Int, Int) // insert with animation
-        case swap(Int, Int, Int) // delete first with animation, then insert it into new position with animation. do not do anything with the second for now
-        case edit(Int, Int) // reload the element without animation
+        case delete(Int, Int)
+        case insert(Int, Int)
+        case swap(Int, Int, Int)
+
+        case edit(Int, Int) // reload the element without animation (otherwise it blinks)
+        case editChangingHeight(Int, Int) // reload the element with simple animation
 
         var description: String {
             switch self {
@@ -236,146 +403,58 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
                 return "swap section \(int) rowFrom \(int2) rowTo \(int3)"
             case .edit(let int, let int2):
                 return "edit section \(int) row \(int2)"
+            case .editChangingHeight(let int, let int2):
+                return "editChangingHeight section \(int) row \(int2)"
             }
         }
     }
 
-    func applyOperation(_ operation: Operation, tableView: UITableView) {
-        let animation: UITableView.RowAnimation = .top
+    func applyOperation(_ operation: Operation, tableView: UITableView, animateInserts: Bool = true, indicatorIndexPath: IndexPath? = nil) {
+        func tableRow(_ section: Int, _ row: Int) -> Int {
+            guard let ip = indicatorIndexPath, ip.section == section, row >= ip.row else { return row }
+            return row + 1
+        }
+
         switch operation {
         case .deleteSection(let section):
-            tableView.deleteSections([section], with: animation)
+            tableView.deleteSections([section], with: .automatic)
         case .insertSection(let section):
-            tableView.insertSections([section], with: animation)
-
+            tableView.insertSections([section], with: .top)
         case .delete(let section, let row):
-            tableView.deleteRows(at: [IndexPath(row: row, section: section)], with: animation)
+            tableView.deleteRows(at: [IndexPath(row: tableRow(section, row), section: section)], with: .top)
         case .insert(let section, let row):
-            tableView.insertRows(at: [IndexPath(row: row, section: section)], with: animation)
-        case .edit(let section, let row):
-            tableView.reconfigureRows(at: [IndexPath(row: row, section: section)])
+            tableView.insertRows(at: [IndexPath(row: tableRow(section, row), section: section)], with: animateInserts ? .top : .none)
         case .swap(let section, let rowFrom, let rowTo):
-            tableView.deleteRows(at: [IndexPath(row: rowFrom, section: section)], with: animation)
-            tableView.insertRows(at: [IndexPath(row: rowTo, section: section)], with: animation)
+            tableView.deleteRows(at: [IndexPath(row: tableRow(section, rowFrom), section: section)], with: .top)
+            tableView.insertRows(at: [IndexPath(row: tableRow(section, rowTo), section: section)], with: .top)
+        case .edit(let section, let row):
+            tableView.reconfigureRows(at: [IndexPath(row: tableRow(section, row), section: section)])
+        case .editChangingHeight(let section, let row):
+            tableView.reloadRows(at: [IndexPath(row: tableRow(section, row), section: section)], with: .automatic)
         }
-    }
-
-    private nonisolated func operationsSplit(oldSections: [MessagesSection], newSections: [MessagesSection]) -> SplitInfo {
-        var appliedDeletes = oldSections // start with old sections, remove rows that need to be deleted
-        var appliedDeletesSwapsAndEdits = newSections // take new sections and remove rows that need to be inserted for now, then we'll get array with all the changes except for inserts
-        // appliedDeletesSwapsEditsAndInserts == newSection
-
-        var deleteOperations = [Operation]()
-        var swapOperations = [Operation]()
-        var editOperations = [Operation]()
-        var insertOperations = [Operation]()
-
-        // 1 compare sections
-
-        let oldDates = oldSections.map { $0.date }
-        let newDates = newSections.map { $0.date }
-        let commonDates = Array(Set(oldDates + newDates)).sorted(by: >)
-        for date in commonDates {
-            let oldIndex = appliedDeletes.firstIndex(where: { $0.date == date } )
-            let newIndex = appliedDeletesSwapsAndEdits.firstIndex(where: { $0.date == date } )
-            if oldIndex == nil, let newIndex {
-                // operationIndex is not the same as newIndex because appliedDeletesSwapsAndEdits is being changed as we go, but to apply changes to UITableView we should have initial index
-                if let operationIndex = newSections.firstIndex(where: { $0.date == date } ) {
-                    appliedDeletesSwapsAndEdits.remove(at: newIndex)
-                    insertOperations.append(.insertSection(operationIndex))
-                }
-                continue
-            }
-            if newIndex == nil, let oldIndex {
-                if let operationIndex = oldSections.firstIndex(where: { $0.date == date } ) {
-                    appliedDeletes.remove(at: oldIndex)
-                    deleteOperations.append(.deleteSection(operationIndex))
-                }
-                continue
-            }
-            guard let newIndex, let oldIndex else { continue }
-
-            // 2 compare section rows
-            // isolate deletes and inserts, and remove them from row arrays, leaving only rows that are in both arrays: 'duplicates'
-            // this will allow to compare relative position changes of rows - swaps
-
-            var oldRows = appliedDeletes[oldIndex].rows
-            var newRows = appliedDeletesSwapsAndEdits[newIndex].rows
-            let oldRowIDs = oldRows.map { $0.id }
-            let newRowIDs = newRows.map { $0.id }
-            let rowIDsToDelete = oldRowIDs.filter { !newRowIDs.contains($0) }.reversed()
-            let rowIDsToInsert = newRowIDs.filter { !oldRowIDs.contains($0) }
-            for rowId in rowIDsToDelete {
-                if let index = oldRows.firstIndex(where: { $0.id == rowId }) {
-                    oldRows.remove(at: index)
-                    deleteOperations.append(.delete(oldIndex, index)) // this row was in old section, should not be in final result
-                }
-            }
-            for rowId in rowIDsToInsert {
-                if let index = newRows.firstIndex(where: { $0.id == rowId }) {
-                    // this row was not in old section, should add it to final result
-                    insertOperations.append(.insert(newIndex, index))
-                }
-            }
-
-            for rowId in rowIDsToInsert {
-                if let index = newRows.firstIndex(where: { $0.id == rowId }) {
-                    // remove for now, leaving only 'duplicates'
-                    newRows.remove(at: index)
-                }
-            }
-
-            // 3 isolate swaps and edits
-
-            for i in 0..<oldRows.count {
-                let oldRow = oldRows[i]
-                let newRow = newRows[i]
-                if oldRow.id != newRow.id { // a swap: rows in same position are not actually the same rows
-                    if let index = newRows.firstIndex(where: { $0.id == oldRow.id }) {
-                        if !swapsContain(swaps: swapOperations, section: oldIndex, index: i) ||
-                            !swapsContain(swaps: swapOperations, section: oldIndex, index: index) {
-                            swapOperations.append(.swap(oldIndex, i, index))
-                        }
-                    }
-                } else if oldRow != newRow { // same ids om same positions but something changed - reload rows without animation
-                    editOperations.append(.edit(oldIndex, i))
-                }
-            }
-
-            // 4 store row changes in sections
-
-            appliedDeletes[oldIndex].rows = oldRows
-            appliedDeletesSwapsAndEdits[newIndex].rows = newRows
-        }
-
-        return SplitInfo(appliedDeletes: appliedDeletes, appliedDeletesSwapsAndEdits: appliedDeletesSwapsAndEdits, deleteOperations: deleteOperations, swapOperations: swapOperations, editOperations: editOperations, insertOperations: insertOperations)
-    }
-
-    private nonisolated func swapsContain(swaps: [Operation], section: Int, index: Int) -> Bool {
-        swaps.filter {
-            if case let .swap(section, rowFrom, rowTo) = $0 {
-                return section == section && (rowFrom == index || rowTo == index)
-            }
-            return false
-        }.count > 0
     }
 
     // MARK: - Coordinator
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
-            viewModel: viewModel, inputViewModel: inputViewModel,
-            isScrolledToBottom: $isScrolledToBottom, isScrolledToTop: $isScrolledToTop,
-            messageBuilder: messageBuilder, mainHeaderBuilder: mainHeaderBuilder,
-            headerBuilder: headerBuilder, type: type, showDateHeaders: showDateHeaders,
-            avatarSize: avatarSize, showMessageMenuOnLongPress: showMessageMenuOnLongPress,
-            tapAvatarClosure: tapAvatarClosure, paginationHandler: paginationHandler,
-            messageStyler: messageStyler, shouldShowLinkPreview: shouldShowLinkPreview,
-            showMessageTimeView: showMessageTimeView,
-            messageLinkPreviewLimit: messageLinkPreviewLimit, messageFont: messageFont,
-            sections: sections, ids: ids, mainBackgroundColor: theme.colors.mainBG,
-            listSwipeActions: listSwipeActions,
-            keyboardDismissMode: keyboardDismissMode)
+            viewModel: viewModel,
+            inputViewModel: inputViewModel,
+            isScrolledToBottom: $isScrolledToBottom,
+            isScrolledToTop: $isScrolledToTop,
+
+            messageBuilder: messageBuilder,
+            mainHeaderBuilder: mainHeaderBuilder,
+            dateHeaderBuilder: dateHeaderBuilder,
+
+            type: type,
+            sections: sections,
+            ids: ids,
+
+            chatParams: chatParams,
+            messageParams: messageParams,
+            mainBackgroundColor: theme.contentBG
+        )
     }
 
     class Coordinator: NSObject, UITableViewDataSource, UITableViewDelegate {
@@ -386,204 +465,219 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
         @Binding var isScrolledToBottom: Bool
         @Binding var isScrolledToTop: Bool
 
-        let messageBuilder: MessageBuilderClosure?
+        // MARK: - View builders
+
+        let messageBuilder: MessageBuilderParamsClosure
         let mainHeaderBuilder: (()->AnyView)?
-        let headerBuilder: ((Date)->AnyView)?
+        let dateHeaderBuilder: ((Date)->AnyView)?
+
+        // MARK: - Data / type
 
         let type: ChatType
-        let showDateHeaders: Bool
-        let avatarSize: CGFloat
-        let showMessageMenuOnLongPress: Bool
-        let tapAvatarClosure: ChatView.TapAvatarClosure?
-        let paginationHandler: PaginationHandler?
-        let messageStyler: (String) -> AttributedString
-        let shouldShowLinkPreview: (URL) -> Bool
-        let showMessageTimeView: Bool
-        let messageLinkPreviewLimit: Int
-        let messageFont: UIFont
         var sections: [MessagesSection] {
             didSet {
-                if let lastSection = sections.last {
-                    paginationTargetIndexPath = IndexPath(row: lastSection.rows.count - 1, section: sections.count - 1)
+                if let id = sections.last?.rows.last?.message.id {
+                    olderPaginationTargetMessageID = id
+                }
+                if let id = sections.first?.rows.first?.message.id {
+                    newerPaginationTargetMessageID = id
                 }
             }
         }
         let ids: [String]
+
+        // MARK: - Customization
+
+        var chatParams: ChatCustomizationParameters
+        let messageParams: MessageCustomizationParameters
         let mainBackgroundColor: Color
-        let listSwipeActions: ListSwipeActions
-        let keyboardDismissMode: UIScrollView.KeyboardDismissMode
+
+        var updateInProgress: Bool = false
+        /// call pagination handler when this row is reached
+        /// without this there is a bug: during new cells insertion willDisplay is called one extra time for the cell which used to be the last one while it is being updated (its position in group is changed from first to middle)
+        var olderPaginationTargetMessageID: String?
+        var newerPaginationTargetMessageID: String?
+        let paginationState = PaginationState()
+
+        // helpers to avoid queueing same updates multiple times
+        var latestUpdateSections: [MessagesSection] = []
 
         private let impactGenerator = UIImpactFeedbackGenerator(style: .heavy)
 
         init(
-            viewModel: ChatViewModel, inputViewModel: InputViewModel,
-            isScrolledToBottom: Binding<Bool>, isScrolledToTop: Binding<Bool>,
-            messageBuilder: MessageBuilderClosure?, mainHeaderBuilder: (() -> AnyView)?,
-            headerBuilder: ((Date) -> AnyView)?, type: ChatType, showDateHeaders: Bool,
-            avatarSize: CGFloat, showMessageMenuOnLongPress: Bool,
-            tapAvatarClosure: ChatView.TapAvatarClosure?, paginationHandler: PaginationHandler?,
-            messageStyler: @escaping (String) -> AttributedString,
-            shouldShowLinkPreview: @escaping (URL) -> Bool, showMessageTimeView: Bool,
-            messageLinkPreviewLimit: Int, messageFont: UIFont, sections: [MessagesSection],
-            ids: [String], mainBackgroundColor: Color, paginationTargetIndexPath: IndexPath? = nil,
-            listSwipeActions: ListSwipeActions, keyboardDismissMode: UIScrollView.KeyboardDismissMode
+            viewModel: ChatViewModel,
+            inputViewModel: InputViewModel,
+            isScrolledToBottom: Binding<Bool>,
+            isScrolledToTop: Binding<Bool>,
+
+            messageBuilder: @escaping MessageBuilderParamsClosure,
+            mainHeaderBuilder: (() -> AnyView)?,
+            dateHeaderBuilder: ((Date) -> AnyView)?,
+
+            type: ChatType,
+            sections: [MessagesSection],
+            ids: [String],
+
+            chatParams: ChatCustomizationParameters,
+            messageParams: MessageCustomizationParameters,
+            mainBackgroundColor: Color
         ) {
             self.viewModel = viewModel
             self.inputViewModel = inputViewModel
             self._isScrolledToBottom = isScrolledToBottom
             self._isScrolledToTop = isScrolledToTop
+
             self.messageBuilder = messageBuilder
             self.mainHeaderBuilder = mainHeaderBuilder
-            self.headerBuilder = headerBuilder
+            self.dateHeaderBuilder = dateHeaderBuilder
+
             self.type = type
-            self.showDateHeaders = showDateHeaders
-            self.avatarSize = avatarSize
-            self.showMessageMenuOnLongPress = showMessageMenuOnLongPress
-            self.tapAvatarClosure = tapAvatarClosure
-            self.paginationHandler = paginationHandler
-            self.messageStyler = messageStyler
-            self.shouldShowLinkPreview = shouldShowLinkPreview
-            self.showMessageTimeView = showMessageTimeView
-            self.messageLinkPreviewLimit = messageLinkPreviewLimit
-            self.messageFont = messageFont
             self.sections = sections
             self.ids = ids
+
+            self.chatParams = chatParams
+            self.messageParams = messageParams
             self.mainBackgroundColor = mainBackgroundColor
-            self.paginationTargetIndexPath = paginationTargetIndexPath
-            self.listSwipeActions = listSwipeActions
-            self.keyboardDismissMode = keyboardDismissMode
         }
 
-        /// call pagination handler when this row is reached
-        /// without this there is a bug: during new cells insertion willDisplay is called one extra time for the cell which used to be the last one while it is being updated (its position in group is changed from first to middle)
-        var paginationTargetIndexPath: IndexPath?
+        var lastReadIndicatorIndexPath: IndexPath? {
+            UIList.lastReadIndicatorIndexPath(sections: sections, enabled: chatParams.showLastReadIndicator)
+        }
 
         func numberOfSections(in tableView: UITableView) -> Int {
             sections.count
         }
 
         func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-            sections[section].rows.count
+            let base = sections[section].rows.count
+            if let ip = lastReadIndicatorIndexPath, ip.section == section {
+                return base + 1
+            }
+            return base
         }
 
-        func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-            if type == .comments {
-                return sectionHeaderView(section)
+        private func messageRow(at indexPath: IndexPath) -> MessageRow? {
+            let indicatorIP = lastReadIndicatorIndexPath
+            guard indexPath != indicatorIP else { return nil }
+            let dataRow: Int
+            if let ip = indicatorIP, ip.section == indexPath.section, indexPath.row > ip.row {
+                dataRow = indexPath.row - 1
+            } else {
+                dataRow = indexPath.row
             }
-            return nil
+            return sections[indexPath.section].rows[dataRow]
         }
 
-        func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
-            if type == .conversation {
-                return sectionHeaderView(section)
-            }
-            return nil
+        // MARK: - headers/footers
+
+        // small optimization: exclude sections that can't possibly have a header/footer
+        func hasSectionView(_ section: Int) -> Bool {
+            chatParams.showDateHeaders || section == 0 || section == sections.count - 1
         }
 
         func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
-            if !showDateHeaders && (section != 0 || mainHeaderBuilder == nil) {
-                return 0.1
-            }
-            return type == .conversation ? 0.1 : UITableView.automaticDimension
+            hasSectionView(section) ? UITableView.automaticDimension : 0
         }
 
         func tableView(_ tableView: UITableView, heightForFooterInSection section: Int) -> CGFloat {
-            if !showDateHeaders && (section != 0 || mainHeaderBuilder == nil) {
-                return 0.1
-            }
-            return type == .conversation ? UITableView.automaticDimension : 0.1
+            hasSectionView(section) ? UITableView.automaticDimension : 0
         }
 
-        func sectionHeaderView(_ section: Int) -> UIView? {
-            if !showDateHeaders && (section != 0 || mainHeaderBuilder == nil) {
-                return nil
-            }
+        func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
+            hasSectionView(section) ? makeHostingView { sectionHeaderView(section) } : nil
+        }
 
-            let header = UIHostingController(rootView:
-                sectionHeaderViewBuilder(section)
-                    .rotationEffect(Angle(degrees: (type == .conversation ? 180 : 0)))
-            ).view
-            header?.backgroundColor = UIColor(mainBackgroundColor)
-            return header
+        func tableView(_ tableView: UITableView, viewForFooterInSection section: Int) -> UIView? {
+            hasSectionView(section) ? makeHostingView { sectionFooterView(section) } : nil
         }
-        
-        func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-            guard let items = type == .conversation ? listSwipeActions.trailing : listSwipeActions.leading else { return nil }
-            guard !items.actions.isEmpty else { return nil }
-            let message = sections[indexPath.section].rows[indexPath.row].message
-            let conf = UISwipeActionsConfiguration(actions: items.actions.filter({ $0.activeFor(message) }).map { toContextualAction($0, message: message) })
-            conf.performsFirstActionWithFullSwipe = items.performsFirstActionWithFullSwipe
-            return conf
+
+        // table's section header: on top of table for .comments, bottom for .conversation
+        func sectionHeaderView(_ section: Int) -> some View {
+            HeaderView(
+                paginationState: paginationState,
+                isFirst: section == 0,
+                type: type,
+                handler: chatParams.newerMessagesPaginationHandler,
+                topContent: { self.sectionTopView(section) }
+            )
         }
-        
-        func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-            guard let items = type == .conversation ? listSwipeActions.leading : listSwipeActions.trailing else { return nil }
-            guard !items.actions.isEmpty else { return nil }
-            let message = sections[indexPath.section].rows[indexPath.row].message
-            let conf = UISwipeActionsConfiguration(actions: items.actions.filter({ $0.activeFor(message) }).map { toContextualAction($0, message: message) })
-            conf.performsFirstActionWithFullSwipe = items.performsFirstActionWithFullSwipe
-            return conf
+
+        // table's section footer: at the bottom of table for .comments, top for .conversation
+        func sectionFooterView(_ section: Int) -> some View {
+            FooterView(
+                paginationState: paginationState,
+                isLast: section == sections.count - 1,
+                type: type,
+                handler: chatParams.olderMessagesPaginationHandler,
+                topContent: { self.sectionTopView(section) }
+            )
         }
-        
-        private func toContextualAction(_ item: SwipeActionable, message:Message) -> UIContextualAction {
-            let ca = UIContextualAction(style: .normal, title: nil) { (action, sourceView, completionHandler) in
-                item.action(message, self.viewModel.messageMenuAction())
-                completionHandler(true)
-            }
-            ca.image = item.render(type: type)
-            
-            let bgColor = item.background ?? mainBackgroundColor
-            ca.backgroundColor = UIColor(bgColor)
-            
-            return ca
-        }
-        
-        @ViewBuilder
-        func sectionHeaderViewBuilder(_ section: Int) -> some View {
-            if let mainHeaderBuilder, section == 0 {
-                VStack(spacing: 0) {
+
+        // is on top for both chat styles
+        func sectionTopView(_ section: Int) -> some View {
+            VStack(spacing: 0) {
+                if let mainHeaderBuilder,
+                    (section == 0 && type == .comments) ||
+                    (section == sections.count - 1 && type == .conversation) {
                     mainHeaderBuilder()
+                }
+                if chatParams.showDateHeaders {
                     dateViewBuilder(section)
                 }
-            } else {
-                dateViewBuilder(section)
             }
         }
 
         @ViewBuilder
         func dateViewBuilder(_ section: Int) -> some View {
-            if showDateHeaders {
-                if let headerBuilder {
-                    headerBuilder(sections[section].date)
-                } else {
-                    Text(sections[section].formattedDate)
-                        .font(.system(size: 11))
-                        .padding(.top, 30)
-                        .padding(.bottom, 8)
-                        .foregroundColor(.gray)
-                }
+            if let dateHeaderBuilder {
+                dateHeaderBuilder(sections[section].date)
+            } else {
+                Text(sections[section].formattedDate)
+                    .font(.system(size: 11))
+                    .padding(.top, 30)
+                    .padding(.bottom, 8)
+                    .foregroundColor(.gray)
             }
         }
 
-        func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        func makeHostingView<Content: View>(@ViewBuilder _ content: () -> Content) -> UIView? {
+            let view = UIHostingController(rootView:
+                content().rotationEffect(Angle(degrees: (type == .conversation ? 180 : 0)))
+            ).view
+            view?.backgroundColor = UIColor(mainBackgroundColor)
+            return view
+        }
 
+        // MARK: - cells
+
+        func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
             let tableViewCell = tableView.dequeueReusableCell(withIdentifier: "Cell", for: indexPath)
             tableViewCell.selectionStyle = .none
             tableViewCell.backgroundColor = UIColor(mainBackgroundColor)
 
-            let row = sections[indexPath.section].rows[indexPath.row]
+            if indexPath == lastReadIndicatorIndexPath {
+                tableViewCell.contentConfiguration = UIHostingConfiguration {
+                    LastReadIndicatorView()
+                        .rotationEffect(Angle(degrees: (type == .conversation ? 180 : 0)))
+                }
+                .minSize(width: 0, height: 0)
+                .margins(.all, 0)
+                return tableViewCell
+            }
+
+            let row = messageRow(at: indexPath)!
             tableViewCell.contentConfiguration = UIHostingConfiguration {
                 ChatMessageView(
-                    viewModel: viewModel, messageBuilder: messageBuilder, row: row, chatType: type,
-                    avatarSize: avatarSize, tapAvatarClosure: tapAvatarClosure,
-                    messageStyler: messageStyler, shouldShowLinkPreview: shouldShowLinkPreview,
-                    isDisplayingMessageMenu: false, showMessageTimeView: showMessageTimeView,
-                    messageLinkPreviewLimit: messageLinkPreviewLimit, messageFont: messageFont
+                    viewModel: viewModel,
+                    messageBuilder: messageBuilder,
+                    row: row,
+                    chatType: type,
+                    messageParams: messageParams,
+                    isDisplayingMessageMenu: false
                 )
-                .transition(.scale)
                 .background(MessageMenuPreferenceViewSetter(id: row.id))
                 .rotationEffect(Angle(degrees: (type == .conversation ? 180 : 0)))
-                .applyIf(showMessageMenuOnLongPress) {
+                .applyIf(chatParams.showMessageMenuOnLongPress) {
                     $0.simultaneousGesture(
                         TapGesture().onEnded { } // add empty tap to prevent iOS17 scroll breaking bug (drag on cells stops working)
                     )
@@ -602,30 +696,133 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-            guard let paginationHandler = self.paginationHandler, let paginationTargetIndexPath, indexPath == paginationTargetIndexPath else {
-                return
+            if updateInProgress { return }
+
+            guard let row = messageRow(at: indexPath) else { return }
+            lazy var message = row.message
+
+            if let onWillDisplayCell = chatParams.onWillDisplayCell {
+                onWillDisplayCell(message)
             }
 
-            let row = self.sections[indexPath.section].rows[indexPath.row]
-            Task.detached {
-                await paginationHandler.handleClosure(row.message)
+            if !paginationState.olderInProgress,
+               let messageID = olderPaginationTargetMessageID,
+               message.id == messageID,
+               let handler = chatParams.olderMessagesPaginationHandler,
+               handler.hasMoreToLoad,
+               case .cellIndex(_) = handler.triggerType {
+                performOlderPagination(tableView)
+            }
+
+            if !paginationState.newerInProgress,
+               let messageID = newerPaginationTargetMessageID,
+               message.id == messageID,
+               let handler = chatParams.newerMessagesPaginationHandler,
+               handler.hasMoreToLoad,
+               case .cellIndex(_) = handler.triggerType {
+                performNewerPagination(tableView)
             }
         }
 
+        func tableView(_ tableView: UITableView, leadingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+            guard let items = type == .conversation ? chatParams.listSwipeActions.trailing : chatParams.listSwipeActions.leading else { return nil }
+            guard !items.actions.isEmpty else { return nil }
+            guard let row = messageRow(at: indexPath) else { return nil }
+            let message = row.message
+            let conf = UISwipeActionsConfiguration(actions: items.actions.filter({ $0.activeFor(message) }).map { toContextualAction($0, message: message) })
+            conf.performsFirstActionWithFullSwipe = items.performsFirstActionWithFullSwipe
+            return conf
+        }
+
+        func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+            guard let items = type == .conversation ? chatParams.listSwipeActions.leading : chatParams.listSwipeActions.trailing else { return nil }
+            guard !items.actions.isEmpty else { return nil }
+            guard let row = messageRow(at: indexPath) else { return nil }
+            let message = row.message
+            let conf = UISwipeActionsConfiguration(actions: items.actions.filter({ $0.activeFor(message) }).map { toContextualAction($0, message: message) })
+            conf.performsFirstActionWithFullSwipe = items.performsFirstActionWithFullSwipe
+            return conf
+        }
+
+        private func toContextualAction(_ item: SwipeActionable, message: Message) -> UIContextualAction {
+            let ca = UIContextualAction(style: .normal, title: nil) { (action, sourceView, completionHandler) in
+                item.action(message, self.viewModel.messageMenuAction())
+                completionHandler(true)
+            }
+            ca.image = item.render(type: type)
+
+            let bgColor = item.background ?? mainBackgroundColor
+            ca.backgroundColor = UIColor(bgColor)
+
+            return ca
+        }
+
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
-            isScrolledToBottom = scrollView.contentOffset.y <= 0
-            isScrolledToTop = scrollView.contentOffset.y >= scrollView.contentSize.height - scrollView.frame.height - 1
+            let contentOffset = scrollView.contentOffset.y
+            let maxTopOffset = scrollView.contentSize.height - scrollView.frame.height - 1
+
+            chatParams.onContentOffsetChange?(contentOffset)
+            isScrolledToBottom = contentOffset <= 0
+            isScrolledToTop = contentOffset >= maxTopOffset
+
+            guard !sections.isEmpty, !updateInProgress else { return }
+
+            if !paginationState.olderInProgress,
+               let handler = chatParams.olderMessagesPaginationHandler,
+               handler.hasMoreToLoad,
+               case let .pixels(offset) = handler.triggerType,
+               contentOffset >= maxTopOffset,
+               let tableView = scrollView as? UITableView {
+                performOlderPagination(tableView)
+            }
+
+            //print(contentOffset, sections.count)
+
+            if !paginationState.newerInProgress,
+               let handler = chatParams.newerMessagesPaginationHandler,
+               handler.hasMoreToLoad,
+               case let .pixels(offset) = handler.triggerType,
+               contentOffset <= offset,
+               let tableView = scrollView as? UITableView {
+                performNewerPagination(tableView)
+            }
+        }
+
+        func performOlderPagination(_ tableView: UITableView) {
+            if let handler = chatParams.olderMessagesPaginationHandler {
+                Task { @MainActor in
+                    tableView.beginUpdates()
+                    paginationState.olderInProgress = true
+                    tableView.endUpdates()
+                    tableView.relayoutHeadersFooters()
+                    await handler.handleClosure()
+                    // set olderInProgress to false after table update is complete
+                }
+            }
+        }
+
+        func performNewerPagination(_ tableView: UITableView) {
+            if let handler = chatParams.newerMessagesPaginationHandler {
+                paginationState.newerInProgress = true
+                Task { @MainActor in
+                    tableView.beginUpdates()
+                    tableView.endUpdates()
+                    tableView.relayoutHeadersFooters()
+                    await handler.handleClosure()
+                    // set newerInProgress to false after table update is complete
+                }
+            }
         }
     }
 
     func formatRow(_ row: MessageRow) -> String {
         String(
-            "id: \(row.id) text: \(row.message.text) status: \(row.message.status ?? .none) date: \(row.message.createdAt) position in user group: \(row.positionInUserGroup) position in messages section: \(row.positionInMessagesSection) trigger: \(row.message.triggerRedraw)"
+            "id: \(row.id) text: \(String(row.message.attributedText.characters)) status: \(row.message.status ?? .none) date: \(row.message.createdAt) position in user group: \(row.positionInUserGroup) position in messages section: \(row.positionInMessagesSection) trigger: \(row.message.triggerRedraw)"
         )
     }
 
     func formatSections(_ sections: [MessagesSection]) -> String {
-        var res = "{\n"
+        var res = "(\(sections.count))(\(sections.map{$0.rows.count})){\n"
         for section in sections.reversed() {
             res += String("\t{\n")
             for row in section.rows {
@@ -638,27 +835,14 @@ struct UIList<MessageContent: View, InputView: View>: UIViewRepresentable {
     }
 }
 
-extension UIList {
-    struct SplitInfo: @unchecked Sendable {
-        let appliedDeletes: [MessagesSection]
-        let appliedDeletesSwapsAndEdits: [MessagesSection]
-        let deleteOperations: [Operation]
-        let swapOperations: [Operation]
-        let editOperations: [Operation]
-        let insertOperations: [Operation]
-    }
-}
-
-actor UpdateQueue {
-    private var isProcessing = false
-
-    func enqueue(_ work: @escaping @Sendable () async -> Void) async {
-        while isProcessing {
-            await Task.yield() // Wait for previous task to finish
+@MainActor
+func performBatchTableUpdates(_ tableView: UITableView, closure: ()->()) async {
+    await withCheckedContinuation { continuation in
+        tableView.performBatchUpdates {
+            closure()
+        } completion: { _ in
+            continuation.resume()
         }
-
-        isProcessing = true
-        await work()
-        isProcessing = false
     }
 }
+

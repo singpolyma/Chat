@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.1
 
 import PackageDescription
 
@@ -16,19 +16,23 @@ let package = Package(
     dependencies: [
         .package(
             url: "https://github.com/exyte/MediaPicker.git",
-            .upToNextMinor(from: "3.2.4")
+            from: "3.4.4"
         ),
         .package(
             url: "https://github.com/exyte/ActivityIndicatorView",
-            from: "1.0.0"
+            from: "2.0.0"
         ),
         .package(
            url: "https://github.com/Giphy/giphy-ios-sdk",
-           from: "2.2.16"
+           exact: "2.2.16"
         ),
         .package(
             url: "https://github.com/onevcat/Kingfisher",
             from: "8.5.0"
+        ),
+        .package(
+            url: "https://github.com/exyte/AnchoredPopup.git",
+            from: "1.1.3"
         ),
         .package(
            url: "https://github.com/SDWebImage/SDWebImageSwiftUI",
@@ -43,6 +47,7 @@ let package = Package(
                 .product(name: "ActivityIndicatorView", package: "ActivityIndicatorView"),
                 .product(name: "GiphyUISDK", package: "giphy-ios-sdk"),
                 .product(name: "Kingfisher", package: "Kingfisher"),
+                .product(name: "AnchoredPopup", package: "AnchoredPopup"),
                 .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI")
             ],
             swiftSettings: [
@@ -52,5 +57,6 @@ let package = Package(
         .testTarget(
             name: "ExyteChatTests",
             dependencies: ["ExyteChat"]),
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )

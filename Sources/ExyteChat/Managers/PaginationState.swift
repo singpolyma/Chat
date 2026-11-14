@@ -3,15 +3,34 @@
 //
 
 import Foundation
+import SwiftUI
 
-public typealias ChatPaginationClosure = @Sendable (Message) async -> Void
+public struct PaginationHandler {
+    public enum TriggerType {
+        /// when (messages.count - 1 - offset)-th message is displayed handleClosure will be called
+        /// 0 means last message triggers handleClosure
+        case cellIndex(_ offset: Int)
+        /// when table's y offset hits this threshold handleClosure will be called
+        case pixels(_ offset: CGFloat)
+    }
 
-final actor PaginationHandler: ObservableObject {
-    let handleClosure: ChatPaginationClosure
-    let pageSize: Int
+    let triggerType: TriggerType
+    let hasMoreToLoad: Bool
+    let handleClosure: () async -> ()
+    let loadingIndicatorBuilder: (()->AnyView)
 
-    init(handleClosure: @escaping ChatPaginationClosure, pageSize: Int) {
+    public init<V: View>(triggerType: TriggerType = .pixels(0), hasMoreToLoad: Bool = true, handleClosure: @escaping () async -> (), loadingIndicatorBuilder: @escaping ()->V = { EmptyView() }) {
+        self.triggerType = triggerType
+        self.hasMoreToLoad = hasMoreToLoad
         self.handleClosure = handleClosure
-        self.pageSize = pageSize
+        self.loadingIndicatorBuilder = { AnyView(loadingIndicatorBuilder()) }
+    }
+
+    @available(*, deprecated, message: "use TriggerType init instead")
+    public init<V: View>(offset: Int = 0, hasMoreToLoad: Bool = true, handleClosure: @escaping () async -> (), loadingIndicatorBuilder: @escaping ()->V = { EmptyView() }) {
+        self.triggerType = .cellIndex(offset)
+        self.hasMoreToLoad = hasMoreToLoad
+        self.handleClosure = handleClosure
+        self.loadingIndicatorBuilder = { AnyView(loadingIndicatorBuilder()) }
     }
 }

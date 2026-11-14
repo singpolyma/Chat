@@ -5,6 +5,7 @@
 import Foundation
 import Combine
 import ExyteMediaPicker
+import SwiftUI
 
 @MainActor
 final class InputViewModel: ObservableObject {
@@ -15,8 +16,10 @@ final class InputViewModel: ObservableObject {
     @Published var state: InputViewState = .empty
 
     @Published var showGiphyPicker = false
-    @Published var showPicker = false
-  
+    @Published var showMediaPicker = false
+    @Published var showDocumentPicker = false
+    @Published var showLocationPicker = false
+
     @Published var mediaPickerMode = MediaPickerMode.photos
 
     @Published var showActivityIndicator = false
@@ -40,7 +43,6 @@ final class InputViewModel: ObservableObject {
     func onStart() {
         DispatchQueue.main.async { [weak self] in
             self?.subscribeValidation()
-            self?.subscribePicker()
             self?.subscribeGiphyPicker()
         }
     }
@@ -50,16 +52,16 @@ final class InputViewModel: ObservableObject {
     }
 
     func reset() {
-        DispatchQueue.main.async { [weak self] in
-            self?.showPicker = false
-            self?.showGiphyPicker = false
-            self?.text = ""
-            self?.attributedText = ""
-            self?.saveEditingClosure = nil
-            self?.attachments = InputViewAttachments()
-            self?.subscribeValidation()
-            self?.state = .empty
-        }
+        text = ""
+        attributedText = ""
+        attachments = InputViewAttachments()
+        state = .empty
+        showGiphyPicker = false
+        showMediaPicker = false
+        showDocumentPicker = false
+        showLocationPicker = false
+        saveEditingClosure = nil
+        subscribeValidation()
     }
 
     func send() {
@@ -80,19 +82,23 @@ final class InputViewModel: ObservableObject {
             self?.inputViewActionInternal($0)
         }
     }
-    
+
     private func inputViewActionInternal(_ action: InputViewAction) {
         switch action {
         case .giphy:
             showGiphyPicker = true
         case .photo:
             mediaPickerMode = .photos
-            showPicker = true
+            showMediaPicker = true
         case .add:
             mediaPickerMode = .camera
         case .camera:
             mediaPickerMode = .camera
-            showPicker = true
+            showMediaPicker = true
+        case .document:
+            showDocumentPicker = true
+        case .location:
+            showLocationPicker = true
         case .send:
             send()
         case .recordAudioTap:
@@ -147,10 +153,8 @@ final class InputViewModel: ObservableObject {
     }
 
     private func recordAudio() {
-        Task {
-            if await recorder.isRecording { return }
-        }
         Task { @MainActor [recorder] in
+            if await recorder.isRecording { return }
             attachments.recording = Recording()
             let url = await recorder.startRecording { duration, samples in
                 DispatchQueue.main.async { [weak self] in
@@ -172,11 +176,12 @@ private extension InputViewModel {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             guard state != .editing else { return } // special case
-            if !self.text.isEmpty || !self.attachments.medias.isEmpty || self.attributedText != "" {
+            let hasAttachments = !self.attachments.medias.isEmpty || !self.attachments.documents.isEmpty || self.attachments.staticLocation != nil || self.attachments.liveLocation != nil
+            if !self.text.isEmpty || !self.attributedText.characters.isEmpty || hasAttachments {
                 self.state = .hasTextOrMedia
             } else if self.text.isEmpty,
-                      self.attributedText == "",
-                      self.attachments.medias.isEmpty,
+                      self.attributedText.characters.isEmpty,
+                      !hasAttachments,
                       self.attachments.recording == nil {
                 self.state = .empty
             }
@@ -210,20 +215,11 @@ private extension InputViewModel {
             .store(in: &subscriptions)
     }
   
-    func subscribePicker() {
-        $showPicker
-            .sink { [weak self] value in
-                if !value {
-                    self?.attachments.medias = []
-                }
-            }
-            .store(in: &subscriptions)
-    }
-
     func subscribeRecordPlayer() {
         Task { @MainActor in
             if let recordingPlayer {
                 recordPlayerSubscription = recordingPlayer.didPlayTillEnd
+                    .receive(on: DispatchQueue.main)
                     .sink { [weak self] in
                         self?.state = .hasRecording
                     }
@@ -245,18 +241,22 @@ private extension InputViewModel {
             AttributedString(self.text)
         }
         showActivityIndicator = true
+        // live location shares need a stable id upfront so subsequent location updates can find this message again
+        let messageId = (attachments.liveLocation != nil) ? UUID().uuidString : nil
         let draft = DraftMessage(
+            id: messageId,
             text: body,
             medias: attachments.medias,
             giphyMedia: attachments.giphyMedia,
+            documents: attachments.documents,
+            staticLocation: attachments.staticLocation,
+            liveLocation: attachments.liveLocation,
             recording: attachments.recording,
             replyMessage: attachments.replyMessage,
             createdAt: Date()
         )
         didSendMessage?(draft)
-        DispatchQueue.main.async { [weak self] in
-            self?.showActivityIndicator = false
-            self?.reset()
-        }
+        showActivityIndicator = false
+        reset()
     }
 }
