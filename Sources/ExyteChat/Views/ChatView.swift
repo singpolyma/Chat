@@ -97,6 +97,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
     @StateObject private var keyboardState = KeyboardState()
 
     @State private var pendingScrollTo: ScrollToParams?
+    @State private var handledScrollToParams: ScrollToParams?
     @State private var isScrolledToBottom: Bool = true
     @State private var tableContentHeight: CGFloat = 0
 
@@ -112,6 +113,34 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
     /// so camera requests always fall through to the ExyteMediaPicker
     private var useSystemPhotoPicker: Bool {
         inputViewCustomizationParameters.photoPickerBackend == .system && inputViewModel.mediaPickerMode == .photos
+    }
+
+    private var scrollToRequestBinding: Binding<ScrollToParams?> {
+        Binding(
+            get: { self.scrollToRequest },
+            set: { self.scrollToRequestConsumed($0) }
+        )
+    }
+
+    private var scrollToRequest: ScrollToParams? {
+        guard let external = self.chatCustomizationParameters.scrollToParams,
+            external != self.handledScrollToParams else {
+            return self.pendingScrollTo
+        }
+        return external
+    }
+
+    private func scrollToRequestConsumed(_ consumed: ScrollToParams?) {
+        guard consumed == nil else {
+            self.pendingScrollTo = consumed
+            return
+        }
+        if let external = self.chatCustomizationParameters.scrollToParams,
+            external != self.handledScrollToParams {
+            self.handledScrollToParams = external
+        } else {
+            self.pendingScrollTo = nil
+        }
     }
 
     private var customMediaPickerBinding: Binding<Bool> {
@@ -198,8 +227,10 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
                     globalFocusState.focus = nil
                 }
             }
-            .onChange(of: chatCustomizationParameters.scrollToParams) { scrollToParams in
-                self.pendingScrollTo = scrollToParams
+            .onChange(of: chatCustomizationParameters.scrollToParams) { _, scrollToParams in
+                if scrollToParams == nil {
+                    self.handledScrollToParams = nil
+                }
             }
     }
 
@@ -353,7 +384,7 @@ public struct ChatView<MessageContent: View, InputViewContent: View, MenuAction:
             viewModel: viewModel,
             inputViewModel: inputViewModel,
 
-            pendingScrollTo: $pendingScrollTo,
+            pendingScrollTo: scrollToRequestBinding,
             isScrolledToBottom: $isScrolledToBottom,
             tableContentHeight: $tableContentHeight,
 

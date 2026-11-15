@@ -124,7 +124,13 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
                         performScrollTo(tableView, scrollToParams: scrollToParams)
                     }
 
-                    if animationMode == .natural {
+                    // A scroll that arrives together with a data update is where a freshly built
+                    // window should start, and there is nothing on screen yet to animate away
+                    // from: the table has just been laid out at its default offset, so animating
+                    // this one shows up as the chat opening at the bottom and then scrolling.
+                    // Requests that arrive on their own (tapping a reply, the scroll-to-bottom
+                    // button) still animate.
+                    if animationMode == .natural, !needToUpdateSections {
                         await withCheckedContinuation { continuation in
                             UIView.animate(withDuration: 0.25) {
                                 perform()
