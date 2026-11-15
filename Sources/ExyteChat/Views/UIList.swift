@@ -830,7 +830,7 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
                     tableView.endUpdates()
                     tableView.relayoutHeadersFooters()
                     await handler.handleClosure()
-                    // set olderInProgress to false after table update is complete
+                    finishPagination(older: true, in: tableView)
                 }
             }
         }
@@ -843,8 +843,22 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
                     tableView.endUpdates()
                     tableView.relayoutHeadersFooters()
                     await handler.handleClosure()
-                    // set newerInProgress to false after table update is complete
+                    finishPagination(older: false, in: tableView)
                 }
+            }
+        }
+
+        private func finishPagination(older: Bool, in tableView: UITableView) {
+            DispatchQueue.main.async {
+                guard !self.updateInProgress else { return }
+                if older {
+                    self.paginationState.olderInProgress = false
+                } else {
+                    self.paginationState.newerInProgress = false
+                }
+                tableView.beginUpdates()
+                tableView.endUpdates()
+                tableView.relayoutHeadersFooters()
             }
         }
     }
