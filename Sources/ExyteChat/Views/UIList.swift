@@ -143,6 +143,7 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
                 context.coordinator.paginationState.newerInProgress = false
                 tableView.endUpdates()
                 tableView.relayoutHeadersFooters()
+                context.coordinator.announceVisibleMessages(in: tableView)
             }
         }
     }
@@ -573,6 +574,19 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
             let rows = sections[indexPath.section].rows
             guard dataRow < rows.count else { return nil }
             return rows[dataRow]
+        }
+
+        func announceVisibleMessages(in tableView: UITableView) {
+            guard let handler = chatParams.onWillDisplayCell else { return }
+            // the conversation table is flipped, so its first row is the newest message
+            let indexPaths = (tableView.indexPathsForVisibleRows ?? []).sorted {
+                type == .conversation ? $0 > $1 : $0 < $1
+            }
+            for indexPath in indexPaths {
+                if let row = messageRow(at: indexPath) {
+                    handler(row.message)
+                }
+            }
         }
 
         // MARK: - headers/footers
