@@ -241,7 +241,10 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
               let preservedVisibleRect = tableView.rectForRow(at: firstVisibleIndexPath) as CGRect? else { return }
 
         let dataRow = adjustedDataRow(firstVisibleIndexPath.row, section: firstVisibleIndexPath.section, indicator: oldIndicatorIP)
-        let firstVisibleRow = coordinator.sections[firstVisibleIndexPath.section].rows[dataRow]
+        guard firstVisibleIndexPath.section < coordinator.sections.count else { return }
+        let oldRows = coordinator.sections[firstVisibleIndexPath.section].rows
+        guard dataRow < oldRows.count else { return }
+        let firstVisibleRow = oldRows[dataRow]
         let preservedVisibleMessageID = firstVisibleRow.message.id
         let preservedOffset = tableView.contentOffset.y
 
@@ -549,6 +552,7 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
         }
 
         func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+            guard section < sections.count else { return 0 }
             let base = sections[section].rows.count
             if let ip = lastReadIndicatorIndexPath, ip.section == section {
                 return base + 1
@@ -557,6 +561,7 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
         }
 
         private func messageRow(at indexPath: IndexPath) -> MessageRow? {
+            guard indexPath.section < sections.count else { return nil }
             let indicatorIP = lastReadIndicatorIndexPath
             guard indexPath != indicatorIP else { return nil }
             let dataRow: Int
@@ -565,14 +570,18 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
             } else {
                 dataRow = indexPath.row
             }
-            return sections[indexPath.section].rows[dataRow]
+            let rows = sections[indexPath.section].rows
+            guard dataRow < rows.count else { return nil }
+            return rows[dataRow]
         }
 
         // MARK: - headers/footers
 
         // small optimization: exclude sections that can't possibly have a header/footer
         func hasSectionView(_ section: Int) -> Bool {
-            chatParams.showDateHeaders || section == 0 || section == sections.count - 1
+            !sections.isEmpty
+                && (chatParams.showDateHeaders || section == 0
+                    || section == sections.count - 1)
         }
 
         func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
@@ -629,14 +638,16 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
 
         @ViewBuilder
         func dateViewBuilder(_ section: Int) -> some View {
-            if let dateHeaderBuilder {
-                dateHeaderBuilder(sections[section].date)
-            } else {
-                Text(sections[section].formattedDate)
-                    .font(.system(size: 11))
-                    .padding(.top, 30)
-                    .padding(.bottom, 8)
-                    .foregroundColor(.gray)
+            if section < sections.count {
+                if let dateHeaderBuilder {
+                    dateHeaderBuilder(sections[section].date)
+                } else {
+                    Text(sections[section].formattedDate)
+                        .font(.system(size: 11))
+                        .padding(.top, 30)
+                        .padding(.bottom, 8)
+                        .foregroundColor(.gray)
+                }
             }
         }
 
@@ -665,7 +676,10 @@ struct UIList<MessageContent: View>: UIViewRepresentable {
                 return tableViewCell
             }
 
-            let row = messageRow(at: indexPath)!
+            guard let row = messageRow(at: indexPath) else {
+                tableViewCell.contentConfiguration = nil
+                return tableViewCell
+            }
             tableViewCell.contentConfiguration = UIHostingConfiguration {
                 ChatMessageView(
                     viewModel: viewModel,
