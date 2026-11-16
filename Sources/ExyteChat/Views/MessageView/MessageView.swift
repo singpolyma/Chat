@@ -32,62 +32,13 @@ struct MessageView: View {
     static let horizontalTextPadding: CGFloat = 12
     static let timeViewTextPadding: CGFloat = 12
     static let timeViewIconSize: CGFloat = 10
+    static let timeViewIconSpacing: CGFloat = 8
     static let horizontalSpacing: CGFloat = horizontalScreenEdgePadding / 2
     static let attachmentPadding: CGFloat = 1  // for multiple attachments
     static let horizontalBubblePadding: CGFloat = 70
 
-    enum TimeViewArrangement {
-        case hstack, vstack, overlay
-    }
-
     var additionalMediaInset: CGFloat {
         message.attachments.count > 1 ? MessageView.attachmentPadding * 2 : 0
-    }
-
-    var timeViewArrangement: TimeViewArrangement {
-        let text = message.attributedText
-        if !text.urls.isEmpty && params.linkPreviewLimit > 0 {
-            return .vstack
-        }
-
-        let isCurrentUser = message.user.isCurrentUser
-        let bubblePaddings = MessageView.horizontalScreenEdgePadding * 2 + MessageView.horizontalBubblePadding
-        let avatarViewWithPaddings = params.avatarSize + MessageView.horizontalSpacing
-        let statusViewWithPaddings = MessageView.statusViewWidth + MessageView.horizontalSpacing
-        let textPaddings = MessageView.horizontalTextPadding * 2
-        let widthWithoutMedia =
-            chatSize.width
-            - bubblePaddings
-            - (params.showAvatar && !isCurrentUser ? avatarViewWithPaddings : 0)
-            - (isCurrentUser ? statusViewWithPaddings : 0)
-            - textPaddings
-
-        let maxWidth = message.attachments.isEmpty
-            ? widthWithoutMedia
-            : MessageView.widthWithMedia - textPaddings
-
-        let finalWidth = text.width(withConstrainedWidth: maxWidth, font: params.font)
-        let lastLineWidth = text.lastLineWidth(labelWidth: maxWidth, font: params.font)
-        let numberOfLines = text.numberOfLines(labelWidth: maxWidth, font: params.font)
-
-        // A thread icon sits in the time row too, so its width has to be reserved for as well.
-        let timeIconWidth = message.icon == nil
-            ? 0 : MessageView.timeViewIconSize + MessageView.horizontalSpacing
-        let timeWidth = AttributedString(message.formattedDate).width(withConstrainedWidth: maxWidth, font: params.timeFont)
-            + MessageView.timeViewTextPadding * 2
-            + timeIconWidth
-
-        // Keep a little slack: the estimate above is rounded to whole points and the text is
-        // laid out a second time by SwiftUI, so an exact fit can still end up truncated.
-        let timeViewSlack: CGFloat = 2
-
-        if numberOfLines == 1, finalWidth + timeWidth + timeViewSlack < maxWidth {
-            return .hstack
-        }
-        if lastLineWidth + timeWidth < finalWidth {
-            return .overlay
-        }
-        return .vstack
     }
 
     var reactionViewWidth: CGFloat {
@@ -161,7 +112,7 @@ struct MessageView: View {
             message.user.isCurrentUser ? .leading : .trailing, MessageView.horizontalBubblePadding
         )
         .frame(
-            maxWidth: chatSize.width,
+            maxWidth: .infinity,
             alignment: message.user.isCurrentUser ? .trailing : .leading
         )
     }
@@ -459,30 +410,24 @@ struct MessageView: View {
         let timeView = messageTimeView()
             .padding(.horizontal, MessageView.timeViewTextPadding)
 
-            Group {
-                switch timeViewArrangement {
-                case .hstack:
-                    HStack(alignment: .lastTextBaseline, spacing: 0) {
-                        // Deliberately unlimited: if the width estimate was too generous the
-                        // text should wrap rather than lose its end to an ellipsis.
-                        messageView
-                        if !message.attachments.isEmpty {
-                            Spacer()
-                        }
-                        timeView
-                    }
-                case .vstack:
-                    VStack(alignment: .trailing, spacing: 4) {
-                        messageView
-                        timeView
-                    }
-                case .overlay:
+        if !params.showTimeView, message.icon == nil {
+            messageView
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .lastTextBaseline, spacing: 0) {
                     messageView
-                        .overlay(alignment: .bottomTrailing) {
-                            timeView
-                        }
+                    if !message.attachments.isEmpty {
+                        Spacer()
+                    }
+                    timeView
+                        .fixedSize()
+                }
+                VStack(alignment: .trailing, spacing: 4) {
+                    messageView
+                    timeView
                 }
             }
+        }
     }
 
     @ViewBuilder
@@ -502,7 +447,7 @@ struct MessageView: View {
 
     @ViewBuilder
     func messageTimeView(needsCapsule: Bool = false) -> some View {
-        HStack {
+        HStack(spacing: MessageView.timeViewIconSpacing) {
             if let icon = message.icon {
                 WebImage(url: icon)
                     .resizable()
